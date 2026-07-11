@@ -1,0 +1,66 @@
+{
+  "identity": {
+    "basket_id": "A_ad_internet__box_tiao__TRADES",
+    "cluster": "A_ad_internet"
+  },
+  "constituents": [
+    {
+      "symbol": "META",
+      "weight": 0.0021510723799730265,
+      "signed_shares": 0.3130684332275191
+    },
+    {
+      "symbol": "GOOGL",
+      "weight": 0.7117681393477516,
+      "signed_shares": 103.59118469535707
+    },
+    {
+      "symbol": "GOOG",
+      "weight": -0.7024059988108502,
+      "signed_shares": -102.22861284662163
+    },
+    {
+      "symbol": "SNAP",
+      "weight": 0.002702134635387571,
+      "signed_shares": 0.39327038204135567
+    }
+  ],
+  "policy": {
+    "z_enter": 2.0,
+    "z_exit": 0.5,
+    "z_stop": 3.5,
+    "time_stop_mult": 3.0,
+    "lookback": 60,
+    "sizing_scalar_gross_notional": 10000.0
+  },
+  "provenance": {
+    "method": "box_tiao",
+    "basis": "TRADES",
+    "is_window": [
+      "2017-03-01",
+      "2022-12-30"
+    ],
+    "is_oos_boundary": "2023-01-01",
+    "price_basis": "raw",
+    "dividend_overlay": true,
+    "is_metrics": {
+      "adf_p": 0.0016152458587117581,
+      "half_life": 14.457525126116023,
+      "wstab": 0.9997305682710693,
+      "round_trips": 42,
+      "sharpe_is": 0.5253899117837796,
+      "maxdd_frac": 0.011678513522398046,
+      "net_pnl": 184.7530621520965
+    },
+    "structural_gate_pass": true,
+    "binding_gates": [],
+    "basis_lock": "PROVISIONAL \u2014 pending Kyle's \u00a70 basis-lock decision"
+  },
+  "status": "candidate",
+  "oos": {
+    "sharpe": null,
+    "max_drawdown": null,
+    "round_trips": null,
+    "half_life": null
+  }
+}

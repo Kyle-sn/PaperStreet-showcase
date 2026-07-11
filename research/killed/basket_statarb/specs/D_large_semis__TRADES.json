@@ -1,0 +1,74 @@
+{
+  "identity": {
+    "basket_id": "D_large_semis__box_tiao__TRADES",
+    "cluster": "D_large_semis"
+  },
+  "constituents": [
+    {
+      "symbol": "NVDA",
+      "weight": -0.6973983493535716,
+      "signed_shares": -581.3739164495676
+    },
+    {
+      "symbol": "AMD",
+      "weight": 0.6976462056640869,
+      "signed_shares": 581.5805375207167
+    },
+    {
+      "symbol": "INTC",
+      "weight": 0.11603384370350724,
+      "signed_shares": 96.72958104522867
+    },
+    {
+      "symbol": "AVGO",
+      "weight": -0.11602352757706294,
+      "signed_shares": -96.72098118714317
+    },
+    {
+      "symbol": "QCOM",
+      "weight": -4.696148401664e-05,
+      "signed_shares": -0.03914861844789932
+    }
+  ],
+  "policy": {
+    "z_enter": 2.0,
+    "z_exit": 0.5,
+    "z_stop": 3.5,
+    "time_stop_mult": 3.0,
+    "lookback": 60,
+    "sizing_scalar_gross_notional": 10000.0
+  },
+  "provenance": {
+    "method": "box_tiao",
+    "basis": "TRADES",
+    "is_window": [
+      "2017-01-03",
+      "2022-12-30"
+    ],
+    "is_oos_boundary": "2023-01-01",
+    "price_basis": "raw",
+    "dividend_overlay": true,
+    "is_metrics": {
+      "adf_p": 0.035287453960608554,
+      "half_life": 72.37425784407517,
+      "wstab": 0.9996336065266734,
+      "round_trips": 22,
+      "sharpe_is": -4.895543410447126,
+      "maxdd_frac": 0.06386612634098689,
+      "net_pnl": -638.6612634098689
+    },
+    "structural_gate_pass": false,
+    "binding_gates": [
+      "half_life",
+      "round_trips"
+    ],
+    "basis_lock": "PROVISIONAL \u2014 pending Kyle's \u00a70 basis-lock decision"
+  },
+  "status": "candidate",
+  "oos": {
+    "sharpe": null,
+    "max_drawdown": null,
+    "round_trips": null,
+    "half_life": null
+  }
+}

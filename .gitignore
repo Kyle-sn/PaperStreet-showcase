@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.idea/
+.vscode/
+
+# Database (created by running tests/db.initialize_db(); not committed)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Research-generated plots (regenerable from the committed scripts)
+research/killed/diversified_trend/output/

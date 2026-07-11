@@ -1,0 +1,68 @@
+{
+  "identity": {
+    "basket_id": "B_money_center_banks__box_tiao__ADJUSTED_LAST",
+    "cluster": "B_money_center_banks"
+  },
+  "constituents": [
+    {
+      "symbol": "JPM",
+      "weight": -0.2565433912279884,
+      "signed_shares": -47.74149084757271
+    },
+    {
+      "symbol": "BAC",
+      "weight": 0.9171178102754858,
+      "signed_shares": 170.6712121323054
+    },
+    {
+      "symbol": "C",
+      "weight": 0.18434012117881676,
+      "signed_shares": 34.304809669713244
+    },
+    {
+      "symbol": "WFC",
+      "weight": -0.24310312671070383,
+      "signed_shares": -45.240322283574656
+    }
+  ],
+  "policy": {
+    "z_enter": 2.0,
+    "z_exit": 0.5,
+    "z_stop": 3.5,
+    "time_stop_mult": 3.0,
+    "lookback": 60,
+    "sizing_scalar_gross_notional": 10000.0
+  },
+  "provenance": {
+    "method": "box_tiao",
+    "basis": "ADJUSTED_LAST",
+    "is_window": [
+      "2017-01-03",
+      "2022-12-30"
+    ],
+    "is_oos_boundary": "2023-01-01",
+    "price_basis": "raw",
+    "dividend_overlay": false,
+    "is_metrics": {
+      "adf_p": 0.04925315044581173,
+      "half_life": 49.447070871920694,
+      "wstab": 0.9309060798168954,
+      "round_trips": 33,
+      "sharpe_is": 0.2681422628203696,
+      "maxdd_frac": 0.07001935219582485,
+      "net_pnl": 670.6328858792459
+    },
+    "structural_gate_pass": false,
+    "binding_gates": [
+      "half_life"
+    ],
+    "basis_lock": "PROVISIONAL \u2014 pending Kyle's \u00a70 basis-lock decision"
+  },
+  "status": "candidate",
+  "oos": {
+    "sharpe": null,
+    "max_drawdown": null,
+    "round_trips": null,
+    "half_life": null
+  }
+}

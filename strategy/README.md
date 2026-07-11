@@ -1,0 +1,227 @@
+# strategy/
+
+This directory contains all trading strategies. Each strategy inherits from `BaseStrategy`. A single-symbol strategy implements `on_bar`; the multi-symbol entry point is `on_bars` (the base class dispatches `on_bars` → `on_bar` when the instance trades one symbol). See `docs/STRATEGY.md` and `docs/MULTI_STRATEGY_REFACTOR.md`.
+
+---
+
+## Adding a New Strategy
+
+### 1. Create your strategy file in the appropriate subdirectory
+
+- `strategy/active/` — complete, stable strategies
+- `strategy/in_progress/` — strategies under active development
+- `strategy/parked/` — strategies that were researched and set aside
+
+Inherit from `BaseStrategy`, add the `@register_strategy` decorator, and implement `on_bar`. That is the only contract required.
+
+```python
+# strategy/active/my_strategy.py
+
+from strategy.base_strategy import BaseStrategy
+from strategy.registry import register_strategy
+from strategy.signal import OrderRequest
+from utils.log_config import setup_logger
+
+logger = setup_logger(__name__)
+
+
+@register_strategy("my_strategy")
+class MyStrategy(BaseStrategy):
+
+    def __init__(self, ...):
+        # Store parameters
+        # Initialize any internal indicator state (e.g. price history)
+        # Do NOT initialize a position counter here — see Position Rule below
+        ...
+
+    def on_bar(self, bar: dict, position: float = 0.0) -> OrderRequest | None:
+        # Process the incoming bar
+        # Return self.buy(...) / self.sell(...), or None
+        ...
+```
+
+### 2. Register it in `strategy/__init__.py`
+
+Add one import line so the decorator runs on package import:
+
+```python
+from strategy.in_progress import my_strategy  # noqa: F401
+```
+
+### 3. Select it via config
+
+In `run_live.py`, set the name and params at the top of the file:
+
+```python
+STRATEGY_NAME = "my_strategy"
+STRATEGY_PARAMS = {"window": 20, ...}
+```
+
+For a backtest, edit the `CONFIG` block in `backtesting/run_backtest.py` (or call
+`run_backtest(BacktestConfig(...))` directly):
+
+```python
+CONFIG = BacktestConfig(strategy_name="my_strategy", symbol="SPY",
+                        strategy_params={"window": 20, ...})
+```
+
+Both call `build_strategy(name, symbols=[...], params=...)` (the legacy `symbol="SPY"` kwarg is still accepted as a single-symbol alias) — no import edits needed when swapping strategies.
+
+---
+
+## The `on_bar` Interface
+
+A single-symbol strategy implements this signature (a multi-symbol strategy overrides
+`on_bars(bars, positions) -> list[OrderRequest]` instead — see `docs/STRATEGY.md`):
+
+```python
+def on_bar(self, bar: dict, position: float = 0.0) -> OrderRequest | None:
+```
+
+**`bar`** is a dict with the following keys:
+
+| Key        | Type    | Description              |
+|------------|---------|--------------------------|
+| `datetime` | str     | Timestamp of the bar     |
+| `open`     | float   | Open price               |
+| `high`     | float   | High price               |
+| `low`      | float   | Low price                |
+| `close`    | float   | Close price              |
+| `volume`   | Decimal | Volume                   |
+
+**`position`** is the current net shares held. See the Position Rule below.
+
+**Return value** is either `None` (no action) or an `OrderRequest` built with `self.buy()` / `self.sell()`:
+
+```python
+return self.buy(quantity=10)                               # market order
+return self.sell(quantity=10, order_type="LMT", limit_price=155.00)  # limit order
+```
+
+`self.buy()` / `self.sell()` auto-populate `symbol` and `strategy` on the `OrderRequest` — do not set them by hand.
+
+---
+
+## Position Rule
+
+**Strategies must not track their own position internally.**
+
+Position is always injected via the `position` parameter of `on_bar`:
+
+- **In live trading** — the caller passes `IBApp.get_position(symbol)`, which is populated by the `updatePortfolio` EWrapper callback from TWS. This is the broker-confirmed position.
+- **In backtesting** — the engine passes `Portfolio.position`, which is updated after each processed signal.
+
+Self-tracking causes drift — the strategy's internal count diverges from reality if the portfolio layer rejects a signal or a fill is partial. See `docs/STRATEGY.md` → Position Awareness for the full rule and rationale.
+
+---
+
+## Existing Strategies
+
+**Top-level**
+
+| File                       | Class                 | Family  | Description                              |
+|----------------------------|-----------------------|---------|------------------------------------------|
+| `base_strategy.py`         | `BaseStrategy`        | —       | Abstract base class for bar strategies.  |
+| `base_quoting_strategy.py` | `BaseQuotingStrategy` | —       | Abstract base class for quoting strategies. |
+| `benchmarks.py`            | `BuyAndHoldStrategy`  | bar     | Always-invested baseline.                |
+|                            | `TimingSmaStrategy`   | bar     | Long while close > SMA(n); the binding timing benchmark. |
+
+**in_progress/**
+
+| File                              | Class                        | Family  | Description                                       |
+|-----------------------------------|------------------------------|---------|---------------------------------------------------|
+| `ercot_market_making_strategy.py` | `ERCOTMarketMakingStrategy`  | quoting | ERCOT fair-value market maker (two-sided quotes). |
+
+**parked/**
+
+| File                   | Class                      | Family | Description                                                                 |
+|------------------------|----------------------------|--------|-----------------------------------------------------------------------------|
+| `spy_short_reversal.py` | `SpyShortReversalStrategy` | bar    | RSI(2)<10 + SMA(200) filter. Parked at §7: OOS Sharpe 0.52 < benchmarks.  |
+
+---
+
+## Research Workflow
+
+Use `research/explore.ipynb` to prototype and validate before implementing a strategy. The notebook is organized as a sequential pipeline — each stage feeds the next.
+
+### Pipeline Overview
+
+```
+Fetch → Indicator Analysis → Feature Engineering → ML → Parameter Optimization → best_params → Signal Overlay → Out-of-Sample Validation
+```
+
+### What each stage does
+
+**Fetch (section 2)**
+Pull historical bars for a symbol via the IBKR session. Set `SYMBOL`, `BAR_SIZE`, and `DURATION` here. All downstream cells operate on this data.
+
+**Indicator Analysis (section 4)**
+Set strategy parameters manually (`WINDOW`, `SPREAD_MULTIPLIER`, `MAX_POSITION`, `ORDER_SIZE`) and compute the indicators the strategy uses internally: SMA, volatility, bands, deviation. This is your starting point for exploration — adjust these values and re-run to see how the indicators respond.
+
+**Feature Engineering**
+Derives ML-ready features from the indicators computed in section 4, and computes forward return labels (did price move up meaningfully N bars later?). Two key variables to tune:
+
+- `FORWARD_BARS` — how far ahead to look when defining a profitable trade
+- `PROFIT_THRESHOLD` — minimum return required to label a bar as profitable
+
+**ML — Random Forest**
+Trains a binary classifier to predict whether a signal will be profitable. Answers the question: *given these indicator conditions, is this signal worth acting on?*
+
+Interpret the output via the classification report:
+- Focus on the `1` row (predicted profitable) — precision and recall tell you how reliably the model identifies good signals
+- 70% accuracy with poor `1` recall means the model is just predicting "don't trade" most of the time — get more data
+- After training, check `model.feature_importances_` to see which features the model found useful
+
+**Parameter Optimization**
+Systematically tests combinations of `WINDOW` and `SPREAD_MULTIPLIER` (and any other parameters you add) across a grid and ranks them by PnL. Answers the question: *what parameter settings produce the most profitable signals historically?*
+
+This is separate from ML — it finds the best settings, ML then filters individual signals at those settings.
+
+**best_params cell**
+Captures the parameters you landed on after optimization and ML analysis into a single dict. Run this when you are satisfied with your research. The signal overlay reads from here automatically.
+
+```python
+best_params = {
+    "window":            WINDOW,
+    "spread_multiplier": SPREAD_MULTIPLIER,
+    "max_position":      MAX_POSITION,
+    "order_size":        ORDER_SIZE,
+}
+```
+
+**Signal Overlay (section 5)**
+Visualizes BUY and SELL signals on the price chart using parameters from `best_params`. Falls back to section 4 values if `best_params` has not been run.
+
+**Out-of-Sample Validation**
+The most important step before trusting any results. Splits the data into two non-overlapping periods:
+
+- **In-sample** — the period used for optimization and ML training (earlier data)
+- **Out-of-sample** — a held-out period never touched during research (later data)
+
+Re-runs the parameter optimization and signal simulation on the out-of-sample period using the parameters found in-sample. If PnL and signal quality hold up on data the model has never seen, the results are more likely to generalize to live trading. If they collapse, the parameters were overfitting to the specific in-sample period and should not be trusted.
+
+**Never use out-of-sample data during research.** It exists only for final validation. Peeking at it during parameter tuning invalidates it.
+
+### Key rules to avoid fooling yourself
+
+**Always use `shuffle=False` for train/test splits.** With time series data, the test set must always be in the future relative to the training set. Shuffling creates lookahead bias — your results will look great but be completely fake.
+
+**Never optimize on out-of-sample data.** Define the split once, run all research on in-sample only, then evaluate on out-of-sample once at the end.
+
+**More data beats a better model.** One week of 1-minute bars (~1,950 rows) is too thin to trust. Pull several months across multiple symbols before drawing conclusions.
+
+**Be skeptical of strong results on small datasets.** If accuracy looks surprisingly good, check for lookahead bias first.
+
+### Typical research session
+
+1. Fetch several months of data for one or more symbols
+2. Set a reasonable starting point in section 4 (e.g. `WINDOW=20`, `SPREAD_MULTIPLIER=1.0`)
+3. Run feature engineering — adjust `FORWARD_BARS` and `PROFIT_THRESHOLD` until label distribution is roughly balanced
+4. Run ML — check feature importances to understand which indicators matter
+5. Run parameter optimization — identify the top-performing parameter combinations
+6. Update section 4 with the best parameters, re-run indicators
+7. Run `best_params` cell to lock in the values
+8. Run out-of-sample validation — only trust results that hold up here
+9. If validation passes, implement the strategy as a class in this directory
+
+Once the signal behavior looks right in the notebook, implement it as a strategy class here and wire it into `run_live.py` and `run_backtest.py` as described above.

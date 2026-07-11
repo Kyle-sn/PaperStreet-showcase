@@ -1,0 +1,70 @@
+{
+  "identity": {
+    "basket_id": "C_cloud_software__box_tiao__ADJUSTED_LAST",
+    "cluster": "C_cloud_software"
+  },
+  "constituents": [
+    {
+      "symbol": "MSFT",
+      "weight": 0.0029826453993434497,
+      "signed_shares": 0.4809657408002368
+    },
+    {
+      "symbol": "AMZN",
+      "weight": 0.7074654234444374,
+      "signed_shares": 114.08216060561799
+    },
+    {
+      "symbol": "CRM",
+      "weight": -0.7067401944179846,
+      "signed_shares": -113.96521397963474
+    },
+    {
+      "symbol": "ORCL",
+      "weight": -0.0014408508020775763,
+      "signed_shares": -0.23234403712771298
+    }
+  ],
+  "policy": {
+    "z_enter": 2.0,
+    "z_exit": 0.5,
+    "z_stop": 3.5,
+    "time_stop_mult": 3.0,
+    "lookback": 60,
+    "sizing_scalar_gross_notional": 10000.0
+  },
+  "provenance": {
+    "method": "box_tiao",
+    "basis": "ADJUSTED_LAST",
+    "is_window": [
+      "2017-01-03",
+      "2022-12-30"
+    ],
+    "is_oos_boundary": "2023-01-01",
+    "price_basis": "raw",
+    "dividend_overlay": false,
+    "is_metrics": {
+      "adf_p": 0.3348347026653111,
+      "half_life": 67.15597604915018,
+      "wstab": 0.832583122783028,
+      "round_trips": 33,
+      "sharpe_is": -10.023892939670626,
+      "maxdd_frac": 0.05530698435588447,
+      "net_pnl": -553.0698435588447
+    },
+    "structural_gate_pass": false,
+    "binding_gates": [
+      "ADF",
+      "half_life",
+      "wstab"
+    ],
+    "basis_lock": "PROVISIONAL \u2014 pending Kyle's \u00a70 basis-lock decision"
+  },
+  "status": "candidate",
+  "oos": {
+    "sharpe": null,
+    "max_drawdown": null,
+    "round_trips": null,
+    "half_life": null
+  }
+}

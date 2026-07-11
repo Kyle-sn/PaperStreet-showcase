@@ -1,0 +1,272 @@
+import sqlite3
+from decimal import Decimal
+import pandas as pd
+from typing import Optional
+from .db import get_connection
+
+
+def _to_float(value):
+    """Coerce IBKR numeric fields to float for SQLite binding.
+
+    Recent ibapi versions hand back price/volume/wap as decimal.Decimal, which
+    sqlite3 refuses to bind ("type 'decimal.Decimal' is not supported"). None is
+    preserved so optional columns still store NULL.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+# Bar sizes whose datetime is a calendar date with no intraday time component.
+_DAILY_BAR_SIZES = {"1 day", "1 week", "1 month"}
+
+
+def _normalize_bar_datetime(value, bar_size: str) -> str:
+    """Coerce any supported datetime representation into a canonical ISO 8601 string.
+
+    Bars have historically reached the DB in two shapes: raw IBKR strings
+    ("20260312" for daily, "20260609  08:30:00" for intraday) from the live fetch
+    path, and ISO strings ("2026-03-12") from other callers. Because bar_datetime
+    is part of the UNIQUE key, those two shapes produced *duplicate* rows for the
+    same bar and broke reads (pandas inferred one format then choked on the other).
+    Normalizing here, at the single write boundary, makes storage consistent
+    regardless of caller.
+
+    Daily/weekly/monthly bars -> date only ("YYYY-MM-DD").
+    Intraday bars -> full ISO timestamp, preserving a timezone offset if present.
+    """
+    if isinstance(value, str):
+        s = value.strip()
+        if len(s) == 8 and s.isdigit():
+            # Raw IBKR daily: "YYYYMMDD"
+            ts = pd.to_datetime(s, format="%Y%m%d")
+        elif len(s) >= 8 and s[:8].isdigit() and " " in s:
+            # Raw IBKR intraday: "YYYYMMDD HH:MM:SS [TZ]" (one or two spaces).
+            parts = s.split()
+            ts = pd.to_datetime(f"{parts[0]} {parts[1]}", format="%Y%m%d %H:%M:%S")
+            if len(parts) >= 3:
+                ts = ts.tz_localize(parts[2])
+        else:
+            # Already ISO (or otherwise parseable) — let pandas infer.
+            ts = pd.to_datetime(s)
+    else:
+        ts = pd.Timestamp(value)
+
+    if bar_size in _DAILY_BAR_SIZES:
+        return ts.date().isoformat()
+    return ts.isoformat()
+
+
+def upsert_bars(
+    symbol: str,
+    bars: list[dict],
+    sec_type: str = "STK",
+    bar_size: str = "1 day",
+    what_to_show: str = "TRADES",
+) -> int:
+    """Insert or update bars. Returns number of rows written (inserted + updated).
+
+    On a UNIQUE-key collision the existing row's OHLCV/wap/bar_count are
+    overwritten with the incoming values, so a re-pull of the same window
+    always refreshes the cache rather than silently retaining stale data.
+
+    bar_datetime is normalized to a canonical ISO string (see _normalize_bar_datetime)
+    so that the UNIQUE key dedups correctly no matter what format the caller supplies.
+    """
+    sql = """
+        INSERT INTO market_data_bars
+            (symbol, sec_type, bar_size, bar_datetime, open, high, low, close, volume, wap, bar_count, what_to_show)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(symbol, sec_type, bar_size, bar_datetime, what_to_show)
+        DO UPDATE SET
+            open      = excluded.open,
+            high      = excluded.high,
+            low       = excluded.low,
+            close     = excluded.close,
+            volume    = excluded.volume,
+            wap       = excluded.wap,
+            bar_count = excluded.bar_count
+    """
+    rows = [
+        (
+            symbol, sec_type, bar_size, _normalize_bar_datetime(b["datetime"], bar_size),
+            _to_float(b["open"]), _to_float(b["high"]), _to_float(b["low"]), _to_float(b["close"]),
+            _to_float(b.get("volume")), _to_float(b.get("wap")), b.get("bar_count"),
+            what_to_show,
+        )
+        for b in bars
+    ]
+    with get_connection() as conn:
+        conn.executemany(sql, rows)
+        return conn.total_changes
+
+
+def migrate_bar_datetimes() -> int:
+    """Rewrite any non-canonical bar_datetime values to canonical ISO, de-duplicating.
+
+    Self-heals databases written before _normalize_bar_datetime existed (which may
+    hold the same bar twice under "20260312" and "2026-03-12"). Idempotent: once all
+    rows are canonical it makes no changes. Returns the number of rows updated.
+    Called from initialize_db so existing databases fix themselves on startup.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, bar_size, bar_datetime FROM market_data_bars"
+        ).fetchall()
+        updated = 0
+        for row in rows:
+            canonical = _normalize_bar_datetime(row["bar_datetime"], row["bar_size"])
+            if canonical == row["bar_datetime"]:
+                continue
+            try:
+                conn.execute(
+                    "UPDATE market_data_bars SET bar_datetime = ? WHERE id = ?",
+                    (canonical, row["id"]),
+                )
+                updated += 1
+            except sqlite3.IntegrityError:
+                # The canonical form already exists for this bar — drop the duplicate.
+                conn.execute("DELETE FROM market_data_bars WHERE id = ?", (row["id"],))
+        return updated
+
+
+def get_bars(
+    symbol: str,
+    sec_type: str = "STK",
+    bar_size: str = "1 day",
+    what_to_show: str = "TRADES",
+) -> Optional[pd.DataFrame]:
+    """Return all cached bars for a symbol as a DataFrame (DatetimeIndex), or None if empty."""
+    sql = """
+        SELECT bar_datetime, open, high, low, close, volume
+        FROM market_data_bars
+        WHERE symbol = ? AND sec_type = ? AND bar_size = ? AND what_to_show = ?
+        ORDER BY bar_datetime ASC
+    """
+    with get_connection() as conn:
+        rows = conn.execute(sql, (symbol, sec_type, bar_size, what_to_show)).fetchall()
+    if not rows:
+        return None
+    df = pd.DataFrame(rows, columns=["datetime", "open", "high", "low", "close", "volume"])
+    # format="mixed" tolerates legacy rows still in raw "YYYYMMDD" form alongside
+    # the canonical ISO that upsert_bars now writes. After migrate_bar_datetimes
+    # runs, all rows are ISO and this is a single inferred format.
+    df["datetime"] = pd.to_datetime(df["datetime"], format="mixed")
+    df.set_index("datetime", inplace=True)
+    # The SQL ORDER BY sorts bar_datetime as text, which is only chronological for
+    # canonical ISO. Sort by the parsed timestamps so order holds even if legacy
+    # raw rows are still present (pre-migration).
+    df.sort_index(inplace=True)
+    return df
+
+
+def get_latest_bar_date(
+    symbol: str,
+    sec_type: str = "STK",
+    bar_size: str = "1 day",
+) -> Optional[str]:
+    """Return ISO8601 string of the most recent stored bar, or None."""
+    sql = """
+        SELECT MAX(bar_datetime)
+        FROM market_data_bars
+        WHERE symbol = ? AND sec_type = ? AND bar_size = ?
+    """
+    with get_connection() as conn:
+        row = conn.execute(sql, (symbol, sec_type, bar_size)).fetchone()
+    return row[0] if row else None
+
+
+def delete_bars_window(
+    symbol: str,
+    start: str,
+    end: str,
+    sec_type: str = "STK",
+    bar_size: str = "1 day",
+    what_to_show: str = "TRADES",
+) -> int:
+    """Delete all cached bars for a symbol within [start, end] inclusive.
+
+    Use this when you need a hard force-refresh of a specific date window
+    (e.g. known-corrupt bars). After deletion, re-fetch from IBKR to repopulate.
+
+    start/end are ISO date strings ("YYYY-MM-DD") for daily bars or ISO
+    timestamps for intraday. They are compared lexicographically against the
+    stored canonical bar_datetime.
+
+    Returns the number of rows deleted.
+    """
+    sql = """
+        DELETE FROM market_data_bars
+        WHERE symbol = ? AND sec_type = ? AND bar_size = ?
+              AND what_to_show = ?
+              AND bar_datetime >= ? AND bar_datetime <= ?
+    """
+    with get_connection() as conn:
+        cursor = conn.execute(sql, (symbol, sec_type, bar_size, what_to_show,
+                                    start, end))
+        return cursor.rowcount
+
+
+def validate_bars(
+    symbol: str,
+    fresh_bars: list[dict],
+    sec_type: str = "STK",
+    bar_size: str = "1 day",
+    what_to_show: str = "TRADES",
+    rtol: float = 1e-6,
+) -> list[dict]:
+    """Compare cached bars against a fresh pull and return discrepancies.
+
+    Each discrepancy is a dict with keys: bar_datetime, field, cached, fresh.
+    An empty list means the cached data matches the fresh pull within rtol.
+
+    Only bars present in *both* the cache and fresh_bars are compared — bars
+    that exist in one but not the other are not flagged (they represent
+    different fetch windows, not corruption).
+    """
+    fresh_by_dt: dict[str, dict] = {}
+    for b in fresh_bars:
+        dt = _normalize_bar_datetime(b["datetime"], bar_size)
+        fresh_by_dt[dt] = b
+
+    if not fresh_by_dt:
+        return []
+
+    dts = sorted(fresh_by_dt.keys())
+    sql = """
+        SELECT bar_datetime, open, high, low, close, volume, wap, bar_count
+        FROM market_data_bars
+        WHERE symbol = ? AND sec_type = ? AND bar_size = ? AND what_to_show = ?
+              AND bar_datetime >= ? AND bar_datetime <= ?
+        ORDER BY bar_datetime
+    """
+    with get_connection() as conn:
+        cached_rows = conn.execute(
+            sql, (symbol, sec_type, bar_size, what_to_show, dts[0], dts[-1])
+        ).fetchall()
+
+    cached_by_dt = {r["bar_datetime"]: r for r in cached_rows}
+
+    diffs: list[dict] = []
+    _FIELDS = [("open", "open"), ("high", "high"), ("low", "low"),
+               ("close", "close"), ("volume", "volume"), ("wap", "wap"),
+               ("bar_count", "bar_count")]
+
+    for dt, fb in fresh_by_dt.items():
+        cr = cached_by_dt.get(dt)
+        if cr is None:
+            continue
+        for cached_col, fresh_key in _FIELDS:
+            cv = cr[cached_col]
+            fv = _to_float(fb.get(fresh_key))
+            if cv is None and fv is None:
+                continue
+            if cv is None or fv is None:
+                diffs.append({"bar_datetime": dt, "field": cached_col,
+                              "cached": cv, "fresh": fv})
+                continue
+            if abs(cv - fv) > rtol * max(abs(cv), abs(fv), 1e-12):
+                diffs.append({"bar_datetime": dt, "field": cached_col,
+                              "cached": cv, "fresh": fv})
+    return diffs
