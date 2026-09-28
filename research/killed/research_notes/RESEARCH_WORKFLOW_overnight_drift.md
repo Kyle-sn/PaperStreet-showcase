@@ -6,7 +6,7 @@
 > Sharpe = 0.27 vs B&H 0.41. Annualized return: 3.4% net overnight vs 7.4% B&H. The failure
 > is structural (cost asymmetry), not decay — the edge is roughly stable across IS years.
 > Tail gate passes (survivable at all deployment fractions). OOS was never opened.
-> EDA: `research/overnight_drift/eda.py` + plots. Decision point below.
+> EDA: `research/killed/overnight_drift/eda.py` + plots. Decision point below.
 >
 > Successor candidate to the intraday-conditional strategy
 > (`intraday_conditional_strategy_notes.md`), which was **killed at Step 3 (H1 rejected
@@ -206,7 +206,7 @@ model), and the fill-semantics flag remain **OPEN** (deferred to Step 4 / their 
    back-adjustment (ADJUSTED_LAST) *smears* that additive gap across the dates that matter (trap
    #2). So we need *unadjusted* OHLC plus an additive dividend add-back. **The deviation is
    documented at the basis's configuration site** — the package builder docstring
-   (`research/overnight_drift/build_dividend_calendar.py`); it will be echoed to `IBKR_NOTES.md` /
+   (`research/killed/overnight_drift/build_dividend_calendar.py`); it will be echoed to `IBKR_NOTES.md` /
    `BACKTESTING.md` when a `BacktestConfig` consuming this basis lands (Step 4), per the "document
    when it lands" note. **Dividend source — RESOLVED: derive from IBKR**, by differencing the two
    cached IBKR daily series (`ADJUSTED_LAST` total return − `TRADES` price return); the gap on a day
@@ -250,7 +250,7 @@ model), and the fill-semantics flag remain **OPEN** (deferred to Step 4 / their 
 8. **Cash convention — RESOLVED & LOCKED: excess-over-3M-T-bill, idle cash credited at the same
    rate subtracted as `risk_free_rate`** — identical treatment for candidate and benchmarks. Reuses
    the **single authoritative** T-bill series already in the repo — `TB3MS_ANNUAL_PCT` +
-   `_daily_rate(year)` in `research/spy_short_reversal/sensitivity.py` (FRED TB3MS annual averages).
+   `_daily_rate(year)` in `research/killed/spy_short_reversal/sensitivity.py` (FRED TB3MS annual averages).
    No second series is introduced. More material here than for any prior candidate (this strategy
    sits in cash ~6.5h/session + weekends). Applied at Step 4; both-ways comparison pattern in that
    same `sensitivity.py`.
@@ -293,8 +293,8 @@ question should be settled **before** Step 4, in Claude Code, against the actual
 ### Step 2 — Universe and Data  ✅ COMPLETE (2026-06-19)
 **Done.** SPY daily TRADES loaded into `market_data_bars` (8402 bars, 1993-01-29 → 2026-06-18,
 date-only ISO, cached under `what_to_show='TRADES'`); IBKR-derived ex-dividend calendar written to
-`research/overnight_drift/spy_dividends.csv` (85 ex-dates, 1993–2026, aligned to ex-div mornings).
-All QC passed (see `research/overnight_drift/README.md` for the full readout). One finding carries
+`research/killed/overnight_drift/spy_dividends.csv` (85 ex-dates, 1993–2026, aligned to ex-div mornings).
+All QC passed (see `research/killed/overnight_drift/README.md` for the full readout). One finding carries
 into Step 3: of the 2 unrecoverable IBKR daily gaps, **2004-07-12 is now pre-IS (irrelevant)** while
 **2007-07-02 remains in-IS** and still needs the drop-both-overnights-spanning-it handling in Step 3.
 The other prior carry-forward — the empty 1997–2005 dividend window (IBKR limitation, Open Decision
@@ -313,7 +313,7 @@ within a few bps).
 **Done when.** Data loaded, checks pass, IS/OOS split locked in writing here.
 
 ### Step 3 — Signal Exploration (Notebook)  ⛔ STOPPED (2026-06-19)
-**Where.** `research/overnight_drift/eda.py` + 4 plots in `research/overnight_drift/`.
+**Where.** `research/killed/overnight_drift/eda.py` + 4 plots in `research/killed/overnight_drift/`.
 **Corrections applied vs the original Step 3 spec:**
 - **OOS-leak fix:** the doc's tail study said "through Feb–Mar 2020 specifically" — that is OOS
   (2019+). Replaced with IS clusters (2008 GFC, 2011, Aug-2015, Feb/Dec-2018).
@@ -449,7 +449,7 @@ First code touchpoints, in order:
 2. **Step 2 data load**: daily SPY TRADES into `market_data_bars` + a dividend calendar + the ex-div
    add-back, with the quality checks above. Hand off with: chosen source, chosen history depth,
    committed IS/OOS dates, and a link to this doc.
-3. **Step 3 EDA notebook** in `research/overnight_drift/` (pure pandas, no engine) — the decomposition,
+3. **Step 3 EDA notebook** in `research/killed/overnight_drift/` (pure pandas, no engine) — the decomposition,
    the tail study, the by-year decay view. Lower stakes; nothing touches `strategy/` or `orders/`.
 
 OUT OF SCOPE for the handoff: no strategy code, no engine changes until the fill-semantics question is
@@ -465,7 +465,7 @@ answered, no short-intraday leg, no parameter optimization.
   daily, depth=1993-01-29 inception; IS=2006-01-01→2018-12-31 / OOS=2019-01-01→present committed;
   long-overnight-only; cash convention locked, reusing spy_short_reversal's TB3MS series). SPY daily
   TRADES loaded (8402 bars); fixed a stale-cache corruption (2 bad 2024 bars that `INSERT OR IGNORE`
-  had shadowed) by deleting + re-pulling clean. Built `research/overnight_drift/` package
+  had shadowed) by deleting + re-pulling clean. Built `research/killed/overnight_drift/` package
   (`build_dividend_calendar.py`, `spy_dividends.csv`, `README.md`). QC passed: no split
   discontinuities, datetime normalized, dividend ex-dates 100% match an external reference over
   2021–2026 (amounts ±$0.03 rounding), OHLC penny-exact vs external (recent) and matching famous
@@ -481,7 +481,7 @@ answered, no short-intraday leg, no parameter optimization.
   on. OOS boundary (2019-01-01 → present) unchanged, still no iteration. Data-gap status: 2004-07-12
   now pre-IS (irrelevant); 2007-07-02 still in-IS (Step-3 drop-both-overnights handling stands).
   No EDA, no overnight-return computation, no code.
-- _2026-06-19_ — **Step 3 complete → STOPPED.** EDA in `research/overnight_drift/eda.py` (3268
+- _2026-06-19_ — **Step 3 complete → STOPPED.** EDA in `research/killed/overnight_drift/eda.py` (3268
   IS trading days, 50 IS ex-div dates, 4 plots). Two corrections applied vs the original Step 3
   spec: (1) the tail study's "Feb–Mar 2020" reference was an OOS leak (2019+) — replaced with IS
   clusters (2008 GFC, 2011 Aug, 2015 Aug, 2018 Feb/Dec); (2) added a net-of-cost overlay to the

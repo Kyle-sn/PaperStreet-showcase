@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from alerts import send_alert
 from risk.rules import (
     ConnectionLivenessRule,
     DailyLossLimitRule,
@@ -96,6 +97,10 @@ class RiskGate:
         ks = self.kill_switch
         if ks is not None:
             ks.trip(reason)
+            # Single choke point for every kill-switch trigger (today:
+            # reconciliation divergence -- run_live.py::run_daily_reconciliation),
+            # so a new trigger added later gets the alert for free.
+            send_alert("kill_switch", reason)
 
 
 def build_risk_gate(config: RiskConfig | None = None) -> RiskGate:

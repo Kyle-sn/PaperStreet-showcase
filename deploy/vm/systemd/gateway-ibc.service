@@ -1,0 +1,24 @@
+[Unit]
+Description=IB Gateway + IBC (paper) for PaperStreet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/IBC
+ExecStart=/home/ubuntu/IBC/start-with-ssm.sh
+Restart=always
+RestartSec=10
+# IBC exits 143 (128+SIGTERM) on a tidy, requested shutdown -- confirmed live
+# 2026-09-27 when the trading-hours stop timer's `systemctl stop` sent SIGTERM
+# and IBC logged "IBC returned exit status 143" / "Gateway finished" right
+# before exiting. Without this, systemd marks that clean stop as `failed`
+# every single day (cosmetic only -- Restart=always still never undoes an
+# explicit stop -- but it pollutes `systemctl --failed`).
+SuccessExitStatus=143
+
+# No [Install] section: this unit is not boot-started. It's started/stopped
+# only by paperstreet-trading-{start,stop}.timer (trading-hours schedule) or
+# by hand. Restart=always covers intra-window crashes only -- a deliberate
+# `systemctl stop` (issued by the stop timer) is never undone by it.

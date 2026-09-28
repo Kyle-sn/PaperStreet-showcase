@@ -1,0 +1,6 @@
+[Unit]
+Description=Stop the PaperStreet engine and Gateway+IBC for the day
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl stop paperstreet-engine.service gateway-ibc.service

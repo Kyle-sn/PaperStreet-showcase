@@ -1,0 +1,8 @@
+[Unit]
+Description=Start Gateway+IBC and the PaperStreet engine for the trading day
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl start gateway-ibc.service paperstreet-engine.service

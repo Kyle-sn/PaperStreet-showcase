@@ -15,23 +15,11 @@ import pandas as pd
 import pytest
 
 from database import db as db_module
-from database import initialize_db
 from database import account as adb
 from database import market_data as mdb
 from database import trading as tdb
 
-
-@pytest.fixture
-def temp_db(tmp_path, monkeypatch):
-    """Point the database layer at a fresh temp file for the duration of a test.
-
-    get_connection() reads database.db._DB_PATH at call time, so redirecting that
-    module global reroutes every db submodule (account/trading/market_data) here.
-    """
-    path = tmp_path / "test.db"
-    monkeypatch.setattr(db_module, "_DB_PATH", path)
-    initialize_db()
-    return path
+# temp_db fixture lives in tests/conftest.py (shared with test_ib_app.py).
 
 
 def _bar(dt, close=100.0):
@@ -193,6 +181,74 @@ def test_order_save_and_status_update(temp_db):
                            (order_id,)).fetchone()
     assert row["status"] == "Filled"
     assert row["filled_quantity"] == 10
+
+
+def test_get_order_db_id_ib_order_id_fallback_uses_newest_row(temp_db):
+    # ib_order_id resets to 1 on every Gateway restart, so an old row and a
+    # new row can legitimately share it. The newest row is always the one
+    # currently in flight (a row is inserted immediately before placeOrder()).
+    old_id = tdb.save_order(symbol="SPY", action="SELL", order_type="MKT", quantity=25, ib_order_id=1)
+    new_id = tdb.save_order(symbol="SPY", action="BUY", order_type="MKT", quantity=65, ib_order_id=1)
+    assert tdb.get_order_db_id(1) == new_id
+    assert tdb.get_order_db_id(1) != old_id
+
+
+def test_update_order_status_by_ib_id_does_not_corrupt_stale_rows_sharing_id(temp_db):
+    # Reproduces a real incident: a fill's orderStatus callback must land on
+    # the order actually being filled, not on every historical row that
+    # happens to share ib_order_id=1.
+    old_id = tdb.save_order(symbol="SPY", action="SELL", order_type="MKT", quantity=25, ib_order_id=1)
+    new_id = tdb.save_order(symbol="SPY", action="BUY", order_type="MKT", quantity=65, ib_order_id=1)
+
+    tdb.update_order_status_by_ib_id(1, status="Filled", filled_quantity=65,
+                                     remaining_quantity=0, avg_fill_price=764.07,
+                                     ib_perm_id=1717289105)
+
+    with db_module.get_connection() as conn:
+        old_row = conn.execute("SELECT status, filled_quantity FROM orders WHERE id = ?",
+                               (old_id,)).fetchone()
+        new_row = conn.execute("SELECT status, filled_quantity, ib_perm_id FROM orders WHERE id = ?",
+                               (new_id,)).fetchone()
+    assert old_row["status"] == "PENDING"
+    assert old_row["filled_quantity"] == 0
+    assert new_row["status"] == "Filled"
+    assert new_row["filled_quantity"] == 65
+    assert new_row["ib_perm_id"] == 1717289105
+
+
+def test_get_order_db_id_prefers_ib_perm_id_once_known(temp_db):
+    # Once ib_perm_id has been recorded, a later ib_order_id collision (e.g.
+    # another restart reusing 1) must not redirect updates to the wrong row.
+    filled_id = tdb.save_order(symbol="SPY", action="BUY", order_type="MKT", quantity=65, ib_order_id=1)
+    tdb.update_order_status_by_ib_id(1, status="Filled", filled_quantity=65,
+                                     remaining_quantity=0, ib_perm_id=1717289105)
+
+    unrelated_id = tdb.save_order(symbol="QQQ", action="BUY", order_type="MKT", quantity=10, ib_order_id=1)
+
+    assert tdb.get_order_db_id(1, ib_perm_id=1717289105) == filled_id
+    assert tdb.get_order_db_id(1, ib_perm_id=1717289105) != unrelated_id
+
+
+def test_update_order_status_only_leaves_fill_fields_untouched(temp_db):
+    order_id = tdb.save_order(symbol="SPY", action="BUY", order_type="MKT", quantity=65, ib_order_id=1)
+    tdb.update_order_status(order_id, status="Filled", filled_quantity=40,
+                            remaining_quantity=25, avg_fill_price=500.0)
+
+    tdb.update_order_status_only(order_id, status="PreSubmitted", ib_perm_id=999)
+
+    with db_module.get_connection() as conn:
+        row = conn.execute(
+            "SELECT status, filled_quantity, remaining_quantity, avg_fill_price, ib_perm_id "
+            "FROM orders WHERE id = ?", (order_id,),
+        ).fetchone()
+    # Status is deliberately overwritten even though it looks like a
+    # regression (Filled -> PreSubmitted) -- this mirrors openOrder()'s
+    # self-heal call, whose only guarantee is not to touch fill bookkeeping.
+    assert row["status"] == "PreSubmitted"
+    assert row["filled_quantity"] == 40
+    assert row["remaining_quantity"] == 25
+    assert row["avg_fill_price"] == 500.0
+    assert row["ib_perm_id"] == 999
 
 
 def test_signal_save_and_mark_executed(temp_db):

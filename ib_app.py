@@ -15,6 +15,7 @@ def decimalMaxString(val):
     return str(val)
 from ibapi.wrapper import EWrapper
 
+from alerts import send_alert
 from database import account as _adb
 from database import trading as _tdb
 from utils.log_config import setup_logger
@@ -81,6 +82,13 @@ class IBApp(EWrapper, EClient):
         self.positions: dict[str, dict] = {}
         self.historical_data = []
         self._historical_data_event = threading.Event()
+        # Keyed by ib_order_id (this session's client-assigned order id).
+        # Populated by openOrder() -- fed on demand by reqOpenOrders(), and
+        # also on any unsolicited replay IBKR does after reconnecting. Used
+        # for startup reconciliation (DEPLOYMENT.md §6.1): a fresh process
+        # can't see a still-working order in its own memory, only IBKR knows.
+        self.open_orders: dict[int, dict] = {}
+        self._open_order_end_event = threading.Event()
 
     def nextValidId(self, order_id: int):
         """"
@@ -115,6 +123,37 @@ class IBApp(EWrapper, EClient):
                 logger.info(f"{IBKR_INFO_CODES[error_code]}")
         else:
             logger.error(f"req_id={req_id}|error_code={error_code}|error_string={error_string}|args={args}")
+            # A handful of order-submission errors are terminal rejections that
+            # IBKR validates and rejects before the order ever enters the book,
+            # so orderStatus never fires and update_order_status_by_ib_id()
+            # there never runs -- the row would stay 'PENDING' forever,
+            # violating "broker is source of truth" (docs/DEPLOYMENT.md §6.1).
+            # Deliberately NOT every non-farm-status code: e.g. 399 is an
+            # advisory ("order queued until market open"), not a rejection --
+            # the order still proceeds to a real orderStatus, and stomping its
+            # row to REJECTED here would race that legitimate update. Only add
+            # a code below once its "never reaches orderStatus" behavior has
+            # actually been observed, not assumed from IBKR's docs.
+            ORDER_REJECTION_CODES = {321}  # "Error validating request" (e.g. Read-Only API)
+            if error_code in ORDER_REJECTION_CODES and req_id is not None and req_id > 0:
+                # IBKR overloads req_id as the order's orderId for order errors.
+                # update_order_status_by_ib_id() is a no-op if no DB row with
+                # that ib_order_id exists (e.g. req_id is really an unrelated
+                # market-data/historical-data request id).
+                _tdb.update_order_status_by_ib_id(
+                    ib_order_id=req_id,
+                    status="REJECTED",
+                    filled_quantity=0,
+                    remaining_quantity=0,
+                    why_held=error_string,
+                )
+                # A hard rejection the engine can't recover from (DEPLOYMENT.md
+                # 7.3) -- distinct from a RiskGate rejection, which is the gate
+                # working as designed and already handled by the next bar.
+                send_alert(
+                    "order_rejected",
+                    f"order {req_id} rejected (code {error_code}): {error_string}",
+                )
 
     def accountSummary(self, req_id: int, account: str, tag: str, value: str, currency: str):
         """
@@ -305,7 +344,7 @@ class IBApp(EWrapper, EClient):
         logger.info(f"req_id={req_id}|symbol={contract.symbol}|sec_type: {contract.secType}" +
                     f"|currency={contract.currency}|execution={execution}")
         try:
-            order_db_id = _tdb.get_order_db_id(execution.orderId)
+            order_db_id = _tdb.get_order_db_id(execution.orderId, ib_perm_id=execution.permId or None)
             _tdb.save_execution(
                 symbol=contract.symbol,
                 side=execution.side,
@@ -333,15 +372,40 @@ class IBApp(EWrapper, EClient):
 
     def openOrder(self, order_id: OrderId, contract: Contract, order: Order, order_state: OrderState):
         """
-        Feeds in currently open orders.
+        Feeds in currently open orders. Fires in response to reqOpenOrders()
+        (see orders/order_handler.py::reconcile_open_orders(), used at engine
+        startup) and unsolicited on reconnect if this client has working orders.
         """
         logger.info(f"order_id={order_id}|contract={contract}|order={order}|order_state={order_state}")
+
+        perm_id = order.permId or None
+        self.open_orders[order_id] = {
+            "symbol": contract.symbol,
+            "action": order.action,
+            "quantity": float(order.totalQuantity),
+            "perm_id": perm_id,
+            "status": order_state.status,
+        }
+
+        # Self-heal the DB row's status against IBKR's (broker is source of
+        # truth, DEPLOYMENT.md §6.1) -- covers a row left stale by an unclean
+        # shutdown. Deliberately status-only: openOrder() doesn't report
+        # filled/remaining/avg_fill_price (only orderStatus()/execDetails()
+        # do), so routing this through update_order_status's zero-defaults
+        # would wipe a partially-filled order's recorded progress.
+        try:
+            db_id = _tdb.get_order_db_id(order_id, ib_perm_id=perm_id)
+            if db_id is not None:
+                _tdb.update_order_status_only(db_id, status=order_state.status, ib_perm_id=perm_id)
+        except Exception as e:
+            logger.error(f"DB error reconciling open order ib_order_id={order_id}: {e}")
 
     def openOrderEnd(self):
         """
         Notifies the end of the open orders’ reception.
         """
         logger.info("OpenOrderEnd")
+        self._open_order_end_event.set()
 
     def orderStatus(self, order_id: OrderId, status: str, filled: Decimal, remaining: Decimal,
                     avg_fill_price: float, perm_id: int, parent_id: int, last_fill_price: float,

@@ -236,10 +236,31 @@ def mark_signal_executed(signal_id: int, order_id: int) -> None:
         )
 
 
-def get_order_db_id(ib_order_id: int) -> Optional[int]:
-    """Return the local primary key for an order given IB's order ID, or None."""
+def get_order_db_id(ib_order_id: Optional[int] = None, ib_perm_id: Optional[int] = None) -> Optional[int]:
+    """Resolve a local orders.id from IBKR identifiers.
+
+    ib_perm_id is globally unique and checked first when present. ib_order_id
+    is only unique within a single API session -- IBKR resets its order-id
+    counter to 1 on every Gateway restart, so distinct sessions' orders can
+    share the same value. The ib_order_id fallback matches the most recently
+    created row with that id: a row is always inserted immediately before
+    placeOrder() is called, so the newest one is the order currently in
+    flight, not a stale row from an earlier session (see DATA_MODEL.md ->
+    orders, the ib_perm_id correlation-gap note).
+    """
     with get_connection() as conn:
-        row = conn.execute("SELECT id FROM orders WHERE ib_order_id = ?", (ib_order_id,)).fetchone()
+        if ib_perm_id:
+            row = conn.execute(
+                "SELECT id FROM orders WHERE ib_perm_id = ?", (ib_perm_id,)
+            ).fetchone()
+            if row:
+                return row[0]
+        if ib_order_id is None:
+            return None
+        row = conn.execute(
+            "SELECT id FROM orders WHERE ib_order_id = ? ORDER BY id DESC LIMIT 1",
+            (ib_order_id,),
+        ).fetchone()
     return row[0] if row else None
 
 
@@ -253,24 +274,59 @@ def update_order_status_by_ib_id(
     ib_perm_id: Optional[int] = None,
     why_held: Optional[str] = None,
 ) -> None:
-    """Update order status using IB's order ID (as received in orderStatus callback)."""
+    """Update order status from an orderStatus()/error() callback.
+
+    Resolves the target row via get_order_db_id() (ib_perm_id-preferred, see
+    its docstring) and updates exactly that one row by primary key -- fixes a
+    real production incident where writing `WHERE ib_order_id = ?` directly
+    landed a single fill's status on 6 unrelated historical rows that
+    happened to share a post-restart ib_order_id. A no-op if no matching row
+    exists.
+    """
+    order_id = get_order_db_id(ib_order_id, ib_perm_id=ib_perm_id)
+    if order_id is None:
+        return
+    update_order_status(
+        order_id, status, filled_quantity, remaining_quantity,
+        avg_fill_price, last_fill_price, ib_perm_id, why_held,
+    )
+
+
+def update_order_status_only(order_id: int, status: str, ib_perm_id: Optional[int] = None) -> None:
+    """Patch just status/ib_perm_id, leaving fill bookkeeping fields untouched.
+
+    Used by the openOrder() startup/reconnect reconciliation, which reports a
+    status but no filled/remaining/avg_fill_price -- those only ever arrive
+    via orderStatus()/execDetails(), and writing through update_order_status's
+    defaults here would zero out a partially-filled order's progress.
+    """
     sql = """
         UPDATE orders SET
-            status             = ?,
-            filled_quantity    = ?,
-            remaining_quantity = ?,
-            avg_fill_price     = ?,
-            last_fill_price    = ?,
-            ib_perm_id         = COALESCE(?, ib_perm_id),
-            why_held           = ?,
-            updated_at         = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        WHERE ib_order_id = ?
+            status     = ?,
+            ib_perm_id = COALESCE(?, ib_perm_id),
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ?
     """
     with get_connection() as conn:
-        conn.execute(sql, (
-            status, filled_quantity, remaining_quantity,
-            avg_fill_price, last_fill_price, ib_perm_id, why_held, ib_order_id,
-        ))
+        conn.execute(sql, (status, ib_perm_id, order_id))
+
+
+def get_recorded_net_position(symbol: str) -> float:
+    """Net signed shares currently implied by our own recorded fills for `symbol`.
+
+    Sums every recorded execution (BOT positive, SLD negative) -- an
+    independent, locally-derived view of what we believe we hold, separate
+    from IBKR's own broker-reported position. Used by the daily reconciliation
+    check (DEPLOYMENT.md §6.3, `risk/reconciliation.py`) to catch a missed
+    fill, a bust, a corporate action, or manual TWS intervention.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(CASE side WHEN 'BOT' THEN shares ELSE -shares END), 0) "
+            "FROM executions WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+    return row[0]
 
 
 def update_execution_commission(

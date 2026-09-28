@@ -28,7 +28,7 @@ that note is the *narrative*.
 ```bash
 python -m research.killed.intraday_conditional.eda            # §3 EDA: prints readout, writes plots/
 jupyter nbconvert --to notebook --execute --inplace \
-    research/intraday_conditional/notebook.ipynb        # §3 narrative, plots embedded
+    research/killed/intraday_conditional/notebook.ipynb        # §3 narrative, plots embedded
 ```
 
 Both read QQQ 5-min `TRADES` bars straight from the local `market_data_bars` cache — no TWS

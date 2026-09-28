@@ -1,0 +1,17 @@
+[Unit]
+Description=PaperStreet live trading engine
+After=network-online.target gateway-ibc.service
+Wants=network-online.target gateway-ibc.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/PaperStreet
+ExecStart=/home/ubuntu/PaperStreet/.venv/bin/python run_live.py
+Restart=always
+RestartSec=10
+
+# No [Install] section: this unit is not boot-started. It's started/stopped
+# only by paperstreet-trading-{start,stop}.timer (trading-hours schedule) or
+# by hand. Restart=always covers intra-window crashes only -- a deliberate
+# `systemctl stop` (issued by the stop timer) is never undone by it.

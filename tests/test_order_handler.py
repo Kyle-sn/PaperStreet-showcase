@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 from ibapi.contract import Contract
 
 from ib_app import IBApp
-from orders.order_handler import wait_for_next_id, place_order
+from orders.order_handler import wait_for_next_id, place_order, reconcile_open_orders
 from orders.order_types import market_order, limit_order
 
 
@@ -144,3 +144,51 @@ def test_order_status_filled_does_not_raise(mock_app):
         why_held="",
         mkt_cap_price=0.0,
     )
+
+
+# ---------------------------------------------------------------------------
+# reconcile_open_orders -- startup duplicate-order guard (DEPLOYMENT.md §6.1)
+# ---------------------------------------------------------------------------
+
+def test_reconcile_open_orders_returns_none_when_no_working_orders(app_with_id):
+    app_with_id.reqOpenOrders = MagicMock(
+        side_effect=lambda: app_with_id._open_order_end_event.set()
+    )
+    assert reconcile_open_orders(app_with_id, "SPY", timeout=1) is None
+
+
+def test_reconcile_open_orders_returns_matching_working_order(app_with_id):
+    def fake_req_open_orders():
+        app_with_id.open_orders[7] = {
+            "symbol": "SPY", "action": "BUY", "quantity": 65.0,
+            "perm_id": 1717289105, "status": "PreSubmitted",
+        }
+        app_with_id._open_order_end_event.set()
+
+    app_with_id.reqOpenOrders = MagicMock(side_effect=fake_req_open_orders)
+
+    result = reconcile_open_orders(app_with_id, "SPY", timeout=1)
+
+    assert result["action"] == "BUY"
+    assert result["quantity"] == 65.0
+    assert result["status"] == "PreSubmitted"
+
+
+def test_reconcile_open_orders_ignores_other_symbols(app_with_id):
+    def fake_req_open_orders():
+        app_with_id.open_orders[7] = {
+            "symbol": "QQQ", "action": "BUY", "quantity": 10.0,
+            "perm_id": 1, "status": "Submitted",
+        }
+        app_with_id._open_order_end_event.set()
+
+    app_with_id.reqOpenOrders = MagicMock(side_effect=fake_req_open_orders)
+
+    assert reconcile_open_orders(app_with_id, "SPY", timeout=1) is None
+
+
+def test_reconcile_open_orders_times_out_gracefully(app_with_id):
+    # openOrderEnd never fires (e.g. a slow/stalled Gateway) -- must not hang
+    # the engine's startup indefinitely or raise; treated as "no working orders."
+    app_with_id.reqOpenOrders = MagicMock()
+    assert reconcile_open_orders(app_with_id, "SPY", timeout=0.2) is None

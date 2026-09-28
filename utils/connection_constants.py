@@ -4,8 +4,8 @@ MARKET_DATA_TYPE = 3
 # IP to connect to
 BROKER_CONNECTION_IP = "127.0.0.1"
 
-# Port to connect to: 7496 = prod | 7497 = paper account
-BROKER_CONNECTION_PORT = 7497
+# Port to connect to. TWS: 7496 = prod | 7497 = paper. IB Gateway (current): 4001 = prod | 4002 = paper.
+BROKER_CONNECTION_PORT = 4002
 
 # Broker API tick type string
 TICK_STRING = "221"
@@ -27,15 +27,11 @@ CURRENCY = "USD"
 # connecting Client ID used to pull order and orders data even from other API connections.
 ORDERS_CLIENT_ID = 0
 
-POSITIONS_CLIENT_ID = 4001
-
 LIVE_ENGINE_CLIENT_ID = 5001
 
 RESEARCH_CLIENT_ID = 6001
 
 EXECUTIONS_REQUEST_ID = 1001
-
-POSITIONS_REQUEST_ID = 2001
 
 HISTORICAL_DATA_REQUEST_ID = 3001
 # TODO: look into a request ID manager

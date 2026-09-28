@@ -1,0 +1,8 @@
+[Unit]
+Description=Check the Pi's live config against deploy/ for drift
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/PaperStreet
+ExecStart=/home/ubuntu/PaperStreet/deploy/check_drift.sh pi

@@ -1,0 +1,8 @@
+[Unit]
+Description=Nightly PaperStreet live DB backup to S3
+
+[Service]
+Type=oneshot
+User=ubuntu
+Environment=PAPERSTREET_BACKUP_BUCKET=<BACKUP_BUCKET>
+ExecStart=/home/ubuntu/PaperStreet/scripts/backup_live_db.sh

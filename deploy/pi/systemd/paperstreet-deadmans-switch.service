@@ -1,0 +1,7 @@
+[Unit]
+Description=PaperStreet dead-man's switch (engine heartbeat check)
+
+[Service]
+Type=oneshot
+StateDirectory=paperstreet
+ExecStart=/usr/local/bin/paperstreet-deadmans-switch.sh

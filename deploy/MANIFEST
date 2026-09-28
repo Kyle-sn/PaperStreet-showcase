@@ -1,0 +1,42 @@
+# deploy/MANIFEST
+#
+# Single source of truth for which repo-tracked config file installs to which
+# live path, on which host. Read by both install.sh and check_drift.sh so the
+# two scripts can't drift apart from each other.
+#
+# Columns (whitespace-separated, source path may not contain spaces):
+#   host   mode   src (relative to deploy/)                       dest (absolute path on the host)
+#
+# "host" is the exact first argument install.sh/check_drift.sh are invoked
+# with (vm|pi) -- there is no hostname-based auto-detection because the VM
+# was never given a friendly hostname (see docs/DEPLOYMENT.md).
+#
+# jts.ini (Gateway's own state file: TimeZone, tradingMode, session hash) is
+# deliberately NOT in this manifest. It's host-generated/mutable, not
+# hand-authored config -- check_drift.sh spot-checks a few expected keys in
+# it directly instead of diffing the whole file.
+
+vm  0644  vm/ibc/config.ini                                 /home/ubuntu/IBC/config.ini
+vm  0644  vm/systemd/gateway-ibc.service                    /etc/systemd/system/gateway-ibc.service
+vm  0644  vm/systemd/paperstreet-engine.service              /etc/systemd/system/paperstreet-engine.service
+vm  0644  vm/systemd/paperstreet-db-backup.service           /etc/systemd/system/paperstreet-db-backup.service
+vm  0644  vm/systemd/paperstreet-db-backup.timer             /etc/systemd/system/paperstreet-db-backup.timer
+vm  0644  vm/journald/paperstreet.conf                       /etc/systemd/journald.conf.d/paperstreet.conf
+vm  0644  vm/journal-upload/paperstreet.conf                 /etc/systemd/journal-upload.conf.d/paperstreet.conf
+vm  0644  vm/systemd/paperstreet-check-drift.service          /etc/systemd/system/paperstreet-check-drift.service
+vm  0644  vm/systemd/paperstreet-check-drift.timer            /etc/systemd/system/paperstreet-check-drift.timer
+vm  0644  vm/systemd/paperstreet-trading-start.service         /etc/systemd/system/paperstreet-trading-start.service
+vm  0644  vm/systemd/paperstreet-trading-start.timer           /etc/systemd/system/paperstreet-trading-start.timer
+vm  0644  vm/systemd/paperstreet-trading-stop.service          /etc/systemd/system/paperstreet-trading-stop.service
+vm  0644  vm/systemd/paperstreet-trading-stop.timer            /etc/systemd/system/paperstreet-trading-stop.timer
+
+pi  0644  pi/sshd/01-paperstreet-hardening.conf               /etc/ssh/sshd_config.d/01-paperstreet-hardening.conf
+pi  0644  pi/journald/paperstreet.conf                        /etc/systemd/journald.conf.d/paperstreet.conf
+pi  0644  pi/watchdog/watchdog.conf                           /etc/systemd/system.conf.d/watchdog.conf
+pi  0644  pi/journal-remote/paperstreet-plain-http.conf       /etc/systemd/system/systemd-journal-remote.service.d/paperstreet-plain-http.conf
+pi  0644  pi/journal-remote/paperstreet.conf                  /etc/systemd/journal-remote.conf.d/paperstreet.conf
+pi  0755  pi/deadmans-switch/paperstreet-deadmans-switch.sh   /usr/local/bin/paperstreet-deadmans-switch.sh
+pi  0644  pi/systemd/paperstreet-deadmans-switch.service      /etc/systemd/system/paperstreet-deadmans-switch.service
+pi  0644  pi/systemd/paperstreet-deadmans-switch.timer        /etc/systemd/system/paperstreet-deadmans-switch.timer
+pi  0644  pi/systemd/paperstreet-check-drift.service           /etc/systemd/system/paperstreet-check-drift.service
+pi  0644  pi/systemd/paperstreet-check-drift.timer             /etc/systemd/system/paperstreet-check-drift.timer

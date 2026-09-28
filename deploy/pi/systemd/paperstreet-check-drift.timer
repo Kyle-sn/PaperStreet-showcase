@@ -1,0 +1,9 @@
+[Unit]
+Description=Run the PaperStreet Pi config-drift check daily
+
+[Timer]
+OnCalendar=*-*-* 10:00:00 Etc/UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
