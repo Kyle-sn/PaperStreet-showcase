@@ -1,7 +1,7 @@
 # IBKR API Notes
 
 Operational notes, gotchas, and decisions specific to the Interactive Brokers Python API.
-This document supplements `IBApp.md` (which covers the EWrapper/EClient architecture) with
+This document supplements `ARCHITECTURE.md` (which covers the EWrapper/EClient architecture) with
 practical knowledge accumulated from building and running PaperStreet.
 
 ---
@@ -10,18 +10,20 @@ practical knowledge accumulated from building and running PaperStreet.
 
 ### TWS vs. IB Gateway
 
-We currently use **TWS** (Trader Workstation) for API connections, not IB Gateway. IB Gateway is
-headless and lighter-weight, and is the preferred choice for unattended automated operation — but
-TWS is what is running now.
+We run **IB Gateway** (paper, port `4002`) for all API connections, managed by IBC for unattended
+login/logoff (see `DEPLOYMENT.md` §3.1-3.2). TWS is not used; Gateway is headless and lighter-weight,
+with an identical API surface.
 
 - TWS paper trading port: `7497`
 - TWS live trading port: `7496`
 - IB Gateway paper trading port: `4002`
 - IB Gateway live trading port: `4001`
 
-TWS must be running and configured to allow API connections (Enable ActiveX and Socket Clients in
-Global Configuration → API → Settings). Note that TWS has a daily auto-logout that will drop the
-connection unless disabled or worked around.
+Gateway must be running and configured to allow API connections (localhost-only, auto-accept).
+Gateway has a daily auto-logout the same as TWS; current configuration is to not run through it at
+all — IBC starts Gateway before market open and shuts it down at 4:30pm ET after the close
+(`AutoLogoffTime` in `config.ini`), so the daily reset happens while nothing is connected. See
+`DEPLOYMENT.md` §3.2/§9 for the reasoning.
 
 ### Client ID
 
@@ -123,7 +125,7 @@ Common values for `reqHistoricalData`:
 **Configurable end-to-end (the parity pattern).** `whatToShow` is a first-class parameter, not a
 hardcoded constant. It threads from the caller through the IBKR request *and* the cache upsert
 (`market_data/ibkr_client.py`), `MarketDataService.get_*`, `BacktestConfig.what_to_show` + the
-backtest loader, and the `run_live.py` fetch (`WHAT_TO_SHOW` constant). See `CONVENTIONS.md` →
+backtest loader, and the `run_live.py` fetch (`WHAT_TO_SHOW` constant). See `BACKTESTING.md` →
 Data basis for the TRADES-vs-ADJUSTED_LAST convention this implements. (parity test:
 `tests/test_market_data_what_to_show.py`.)
 
@@ -233,3 +235,34 @@ log at ERROR level.
   around limit order fills and partial fills.
 - **reqMktData snapshot mode**: Passing `snapshot=True` to `reqMktData` returns a one-time quote
   rather than a live stream. This counts against request limits differently.
+- **Degenerate historical futures bars beyond real entitlement depth**: `reqHistoricalData` on a
+  CONTFUT/FUT contract can return `historicalDataEnd` successfully (no error, no empty result) for
+  dates beyond what this account's market data subscription actually covers, but the bars for that
+  stretch are **not real** — `open == high == low == close` with `volume == 0`, silently repeated
+  for every bar. Discovered on CL (NYMEX front-month continuous): a `durationStr="50 Y"` request
+  returned bars back to 2018-01-24 with no error, but 1,550 of 2,116 bars (73%, everything before
+  2024-09-17) were flat/zero-volume — including 2020-04-20, the day front-month WTI famously
+  settled negative, reading a flat **positive** $38.83. Root cause not confirmed, but the shape
+  (a plausible-looking price repeated with no range or volume, cutting off at a specific date
+  rather than erroring) is consistent with a missing NYMEX energy historical-data entitlement on
+  this account/subscription, with IBKR backfilling a stale-snapshot placeholder instead of
+  rejecting the request. **Do not trust a wide date range on its own as evidence of usable
+  coverage for futures** — check for `open==high==low==close and volume==0` runs before treating
+  any part of a futures pull as real (`research/killed/petroleum_status_drift/ibkr_depth_probe.py::_flat_bar_mask`
+  has a reusable check). This has not been observed on the equity/STK bar path.
+- **CONTFUT rejects `endDateTime`**: `reqHistoricalData` on a `secType="CONTFUT"` contract errors
+  with code `10339` ("Setting end date/time for continuous future security type is not allowed")
+  if `endDateTime` is non-empty. A CONTFUT pull can only ask "how far back from now", not "as of
+  this past date" — there is no way to page a CONTFUT request backward the way an STK/individual
+  FUT request can. Walking further back requires individual dated FUT contracts instead (see next
+  point).
+- **Individual expired FUT contracts need `endDateTime` anchored at their own expiration, not
+  omitted**: for an expired `secType="FUT"` contract, an empty `endDateTime` does **not** default
+  to that contract's last trading day — it defaults to *now*, so a contract that stopped trading
+  years ago naturally returns "no data" for a window ending today. Anchor `endDateTime` near the
+  contract's approximate expiration explicitly. Separately, on this account individual dated CL
+  FUT contracts only resolved via symbol+`lastTradeDateOrContractMonth` lookup for roughly the
+  trailing 12–13 months — older contract-months (tested down to 2001, spaced through 2024)
+  returned error `200` ("No security definition has been found for the request") even with the
+  endDateTime fix and `includeExpired=True`. Reaching further back would need
+  `reqContractDetails`-based conId resolution rather than a bare symbol+month contract.

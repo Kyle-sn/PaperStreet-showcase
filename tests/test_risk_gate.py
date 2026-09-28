@@ -12,6 +12,7 @@ import pytest
 from unittest.mock import MagicMock
 from ibapi.contract import Contract
 
+import risk.gate
 from orders.order_handler import place_order
 from orders.order_types import market_order, limit_order
 from risk.account_state import AccountState
@@ -237,6 +238,26 @@ def test_gate_trip_kill_switch_halts(spy_contract):
     assert gate.check(market_order("BUY", 100), spy_contract, fresh_state()).approved
     gate.trip_kill_switch("test halt")
     assert not gate.check(market_order("BUY", 100), spy_contract, fresh_state()).approved
+
+
+def test_gate_trip_kill_switch_alerts(monkeypatch):
+    alerts = []
+    monkeypatch.setattr(risk.gate, "send_alert", lambda kind, msg: alerts.append((kind, msg)))
+    gate = build_risk_gate()
+
+    gate.trip_kill_switch("position reconciliation divergence for SPY")
+
+    assert alerts == [("kill_switch", "position reconciliation divergence for SPY")]
+
+
+def test_gate_trip_kill_switch_does_not_alert_if_no_kill_switch_rule(monkeypatch):
+    alerts = []
+    monkeypatch.setattr(risk.gate, "send_alert", lambda kind, msg: alerts.append((kind, msg)))
+    gate = RiskGate([])  # no KillSwitchRule composed in
+
+    gate.trip_kill_switch("unreachable")
+
+    assert alerts == []
 
 
 def test_gate_exposes_stateful_rules(spy_contract):

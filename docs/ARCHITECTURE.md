@@ -18,14 +18,17 @@ and IBKR's own rate limits are all acceptable constraints at mid-frequency hold 
 ```
 PaperStreet/
 ├── ib_app.py              # Core IBApp class (EWrapper + EClient combined)
-├── IBApp.md               # Architecture notes for the IB API layer
 ├── database/
+│   ├── db.py              # Connection setup, initialize_db()
+│   ├── schema.sql          # All CREATE TABLE DDL
 │   ├── account.py         # Account/position snapshot persistence
-│   └── trading.py         # Order and execution persistence
+│   ├── trading.py         # Order, execution, and trade-group persistence
+│   ├── market_data.py     # Bar cache read/write, validation
+│   └── validate_cache.py  # CLI for validating cached bars against a live pull
 ├── market_data/           # Market data requests, bar handling, storage
 ├── contracts/             # Contract definitions and helpers
 ├── orders/                # Order construction and submission logic
-├── positions/             # Position state helpers (wraps ib_app.positions)
+├── risk/                  # Pre-trade RiskGate — system-wide hard limits (see RISK.md)
 ├── strategy/              # Strategy implementations
 ├── backtesting/           # Offline backtesting harness
 ├── research/              # Notebooks, signal research, exploratory work
@@ -55,10 +58,13 @@ IBApp is **not** responsible for strategy logic. It is infrastructure only.
 
 ### `database/`
 
-Two submodules with thin persistence functions:
+Thin persistence functions, organized by domain (see `database/README.md` for the full module map):
 
+- `db.py` — `get_connection()`, `initialize_db()`, `get_db_path()`
+- `schema.sql` — all `CREATE TABLE IF NOT EXISTS` DDL
 - `account.py` — `save_account_snapshot()`, `save_position_snapshot()`
-- `trading.py` — `save_execution()`, `update_execution_commission()`, `update_order_status_by_ib_id()`, `get_order_db_id()`
+- `trading.py` — `save_execution()`, `update_execution_commission()`, `update_order_status_by_ib_id()`, `get_order_db_id()`, `assign_trade_group()`
+- `market_data.py` — `upsert_bars()`, `get_bars()`, `delete_bars_window()`, `validate_bars()`
 
 The database backend is SQLite (or Postgres — see `DATA_MODEL.md`). All DB writes from IBApp
 callbacks are wrapped in try/except so that a DB error never crashes the callback thread.
@@ -86,11 +92,30 @@ Order construction and submission logic:
 
 Orders should only be submitted from this layer — strategies should never call `placeOrder` directly.
 
-### `positions/`
+Account/position subscription (`reqAccountUpdates`) lives inline in
+`research/session.py::Session._connect()` — there is no separate `positions/` package. One used to
+exist (`positions/position_handler.py`, with its own dedicated IBKR connection on
+`POSITIONS_CLIENT_ID`), but nothing besides its own manual smoke test ever used that standalone
+connection path, so it was removed in favor of the one call site in `Session`. Query helpers over
+`ib_app.positions` (e.g. "are we flat?", "what is our current exposure?") are still on the
+`ROADMAP.md` backlog and would need a new home when built.
 
-Helpers that read position state from `ib_app.positions`. This layer translates the raw dict into
-useful queries (e.g. "are we flat?", "what is our current exposure?"). It reads but does not write
-to IBApp state.
+### `risk/`
+
+The pre-trade `RiskGate` — system-wide hard limits no strategy can bypass. `risk/gate.py::RiskGate`
+composes isolated rules from `risk/rules.py` (kill switch, connection-liveness/stale-data guard,
+latching daily loss limit, per-order share/notional cap) and is invoked by
+`orders/order_handler.py::place_order` before `app.placeOrder` is ever called. `risk/account_state.py`
+builds the `AccountState` snapshot the gate reads from. See `RISK.md` for the full rule set and
+current parameters.
+
+`risk/reconciliation.py::reconcile_position()` is the daily state-correctness check
+(`DEPLOYMENT.md` §6.3), run once per calendar day from `run_live.py::trading_loop()` via
+`run_daily_reconciliation()`. It compares IBKR's broker-reported position against the net signed
+sum of our own recorded `executions` rows (`database/trading.py::get_recorded_net_position()`) —
+an independent cross-check, not a re-read of the same broker data — and trips the `RiskGate` kill
+switch on any divergence. Position-only for now; cash reconciliation would need a local cash
+ledger that doesn't exist yet (`ROADMAP.md`).
 
 ### `strategy/`
 
@@ -135,13 +160,13 @@ call to get a consistently configured logger.
        ▼
   strategy/
        │
-       │  order requests (symbol, side, qty, type, price)
+       │  OrderRequest (symbol, action, qty, type, price)
        ▼
-  orders/
-       │
-       │  EClient calls (placeOrder, cancelOrder)
-       ▼
-  TWS / IB Gateway
+  orders/  ──── place_order() checks risk/::RiskGate before submission ────►  risk/
+       │                                                                      (kill switch,
+       │  EClient calls (placeOrder, cancelOrder)                            stale-data guard,
+       ▼                                                                      loss limit,
+  TWS / IB Gateway                                                           order size cap)
 ```
 
 ---

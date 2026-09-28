@@ -4,7 +4,7 @@ eda.py — Step 3 signal EDA for the intraday conditional strategy (QQQ).
 PURE EDA. No strategy module, no backtester, no orders. Reads QQQ 5-min TRADES
 bars straight from the local `market_data_bars` cache and characterizes the
 H1 conditional relationship between the first-hour return and the rest-of-day
-return. See research/research_notes/intraday_conditional_strategy_notes.md
+return. See research/killed/research_notes/intraday_conditional_strategy_notes.md
 (Step 3) for the spec, and this directory's README.md.
 
 SAMPLE DISCIPLINE (enforced at the data layer):

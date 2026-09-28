@@ -25,7 +25,6 @@ own entry/exit gating logic.
 
 Examples in the codebase:
 - `spy_short_reversal`: single-entry (`position <= 0` to enter, sell full position to exit)
-- `ercot_market_making`: `max_position` hard cap — no quote returned when `abs(position) >= max_position`
 
 ### Strategy-level order sizing
 
@@ -98,6 +97,22 @@ accepted for now. **Self-marking** (marking live positions × last close between
 tighter, self-computed PnL) is explicitly **parked as a later precision refinement**, not built
 here.
 
+### Daily position reconciliation
+
+`DEPLOYMENT.md` §6.3's scheduled check: `run_live.py::trading_loop()` calls
+`run_daily_reconciliation()` once per calendar day (not per bar — a state-correctness audit, not a
+trading decision), which compares IBKR's broker-reported position (`session.get_position(symbol)`)
+against the net signed sum of our own recorded `executions` rows
+(`database/trading.py::get_recorded_net_position()`, `risk/reconciliation.py::reconcile_position()`).
+This is a genuinely independent check, not a re-read of the same broker data — `get_position()`
+already just relays IBKR's own confirmed value (see Broker-authoritative position, above), so the
+comparison is against our *own* fill history instead, catching a missed fill, a bust, a corporate
+action (split/reverse split/merger), or manual intervention in TWS. Any nonzero divergence trips the
+`RiskGate` kill switch (same sticky latch as the daily loss limit) and logs the discrepancy — treated
+as a system fault per §6.3, not a warning. **Position-only**: cash reconciliation would need a full
+local cash ledger (starting balance + every fill's proceeds − commissions), which doesn't exist yet
+(see Known Gaps, below).
+
 ## OTHER
 - Inverse-vol position sizing must apply a per-instrument vol-estimate floor
   (≈ trailing 1–2yr 10th–20th percentile of realized vol) or an equivalent
@@ -116,6 +131,13 @@ There is no check against total portfolio value or available cash before placing
 RiskGate caps *per-order* size, not aggregate exposure across orders/positions. The system still
 relies on IBKR to reject orders that exceed buying power. Aggregate/per-symbol exposure checks are
 scoped for `MULTI_STRATEGY_REFACTOR.md` Phase 4 (built on the planned `positions/` helper).
+
+### No cash reconciliation
+
+Daily reconciliation (above) covers positions only. Reconciling cash would require a local ledger
+of starting balance + every fill's proceeds − commissions, independent of IBKR's own reported
+`cash_balance` — that ledger doesn't exist. A cash-side bug (e.g. a commission miscount) would not
+be caught today.
 
 ---
 
@@ -169,7 +191,7 @@ account:
 | `rsi_entry` | — | spy_short_reversal entry threshold |
 | `target_notional` | — | spy_short_reversal position size |
 | `ACCOUNT_NUMBER` | — | Paper account; must change for live |
-| `BROKER_CONNECTION_PORT` | — | Paper TWS port; different port for live TWS |
+| `BROKER_CONNECTION_PORT` | — | Paper IB Gateway port; different port for live Gateway |
 | `RiskConfig.max_order_shares` | — | Per-order share cap (fat-finger ceiling); review vs. live sizing |
 | `RiskConfig.max_order_notional` | — | Per-order notional cap; sized relative to target_notional |
 | `RiskConfig.daily_loss_limit` | — | Latching breaker; sized as a % of the paper track. Tighten for live |
@@ -214,3 +236,37 @@ conflating them corrupts sizing assumptions.
   this file. A candidate that passes research on this track still needs a
   live-deployment capital plan reconciled against actual firm capital
   before going live — passing at $5M ≠ authorization to size at $5M.
+
+---
+
+## Tail-Control Parameter Selection: Drawdown Budget, Not Sharpe
+
+Tail-control parameters — stop distance, position caps, exposure limits, vol targets — are
+selected against a **drawdown budget**, not against Sharpe. This generalizes the vol-target
+note already made in `RESEARCH_WORKFLOW_diversified_trend.md` Step 4 ("vol-target is a
+drawdown-budget choice, not a Sharpe choice") to every tail-control parameter, not only vol
+target.
+
+**Mechanism.** For a mean-reversion signal, tightening a stop typically *reduces* Sharpe,
+because it cuts the trades that were about to revert. A Sharpe-maximizing search over stop
+distance will tend toward "no stop," which is a correct answer to the wrong question — the
+stop exists to bound the tail, not to raise risk-adjusted return.
+
+**Sanctioned form of the selection.** Choose the loosest setting whose worst IS drawdown
+stays inside the floor-implied ceiling — anchored to the $50k/$25k PDT-floor framing under
+Capital Tracks, above — subject to Sharpe not degrading beyond a pre-committed tolerance
+versus the uncontrolled variant. State both numbers (the drawdown ceiling and the Sharpe
+tolerance) before running the sweep.
+
+**Fill assumption for intrabar-triggered exits.** Any exit whose trigger is intrabar (a stop
+level, not a scheduled close) but is evaluated on daily bars must use a conservative fill —
+next-session open, or worst-of — never the trigger level itself, and the fill assumption
+should itself be a sweep axis. A result that survives only under the optimistic (trigger-
+level) fill is a fill-model artifact, not an edge. See the gap-through-stop limitation
+already documented in `RESEARCH_WORKFLOW_basket_statarb.md` ("most likely ways this backtest
+will lie to you", item 3).
+
+Cross-reference: `docs/BACKTESTING.md` → "Free parameters: pre-declared selection vs
+post-hoc re-tuning" covers signal parameters with no canonical value, selected against
+Sharpe/plateau. This section covers risk parameters, which are selected against drawdown
+even when pre-declared the same way.

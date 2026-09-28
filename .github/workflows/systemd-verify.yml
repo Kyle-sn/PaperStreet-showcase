@@ -1,0 +1,40 @@
+name: Verify systemd units
+
+# systemd-analyze verify checks unit-file syntax and resolves the things it
+# references (ExecStart binaries, User=, WorkingDirectory=). Both hosts use
+# the same absolute paths (User=ubuntu, /home/ubuntu/PaperStreet,
+# /home/ubuntu/IBC), so one stubbed layout covers deploy/vm and deploy/pi --
+# they just must be verified in separate systemd-analyze calls, since both
+# host directories define a same-named paperstreet-check-drift.service/.timer
+# and loading both sets at once would collide.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  systemd-analyze-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stub the production layout the unit files reference
+        run: |
+          set -euo pipefail
+          id -u ubuntu >/dev/null 2>&1 || sudo useradd -m -s /bin/bash ubuntu
+          sudo mkdir -p /home/ubuntu/PaperStreet/.venv/bin /home/ubuntu/PaperStreet/scripts /home/ubuntu/PaperStreet/deploy /home/ubuntu/IBC
+          for f in \
+            /home/ubuntu/PaperStreet/.venv/bin/python \
+            /home/ubuntu/PaperStreet/scripts/backup_live_db.sh \
+            /home/ubuntu/PaperStreet/deploy/check_drift.sh \
+            /home/ubuntu/IBC/start-with-ssm.sh \
+            /usr/local/bin/paperstreet-deadmans-switch.sh; do
+            sudo install -m 0755 /dev/null "$f"
+          done
+          sudo chown -R ubuntu:ubuntu /home/ubuntu
+
+      - name: systemd-analyze verify -- VM units
+        run: sudo systemd-analyze verify deploy/vm/systemd/*.service deploy/vm/systemd/*.timer
+
+      - name: systemd-analyze verify -- Pi units
+        run: sudo systemd-analyze verify deploy/pi/systemd/*.service deploy/pi/systemd/*.timer

@@ -3,9 +3,16 @@
 # Install from the official TWS API download instead:
 #   pip install "C:\TWS API\source\pythonclient"   # Windows
 # Tested against ibapi==10.41.1 (pulls in protobuf>=5.29).
-protobuf==5.29.5
+# Pinned to 5.29.6+ to fix CVE-2026-0994 (JSON recursion depth bypass in
+# google.protobuf.json_format.ParseDict via nested Any messages).
+protobuf==5.29.6
 matplotlib==3.10.9
 pandas==3.0.3
+numpy==2.4.6
 pytest==9.0.3
-numpy
-statsmodels   # research/killed/basket_statarb only (Johansen/ADF tests)
+boto3==1.43.103  # alerts/discord.py: SSM read for the Discord webhook URL (VM only)
+
+# Research-only dependencies (statsmodels, scipy, databento, yfinance) live in
+# requirements-research.txt -- the live engine doesn't need them. Install it
+# too if you want the full `pytest` suite to pass, since test_basket_statarb.py
+# exercises research/basket_statarb.

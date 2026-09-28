@@ -19,6 +19,33 @@ to mid-frequency and would require significant re-architecture for HFT.
 
 ---
 
+## Instrument Universe Constraint
+
+PaperStreet does not purchase corporate-action, delisting, or point-in-time universe data. This is a standing budget decision, not a technical limitation, and it is the binding constraint on candidate admissibility.
+
+Consequence: strategies trading shares of individual companies are out of scope. Without a delisting-inclusive source, any single-name universe built from IBKR is survivor-only by construction, which inflates backtested returns most for exactly the mean-reverting and buy-weakness strategies that look most attractive. This is not a bias that can be bounded or disclosed away.
+
+Admissible instruments:
+
+Exchange-traded funds and notes, enumerated by name in the candidate's workflow doc.
+Listed futures, per the roll and continuous-series methodology in DATA_MODEL.md.
+
+Universe construction rule (applies to both): the universe must be a short, explicitly enumerated list, committed in the workflow doc before any data is pulled, with a written economic rationale per instrument and a verified listing history covering the full IS and OOS window. Screening, ranking, or selecting instruments from a broader candidate set reinstates survivorship bias regardless of asset class. Over a hundred US ETFs liquidate annually and IBKR does not serve history for closed funds.
+
+Futures note: futures have no corporate actions but carry the structural equivalent (rolls, continuous-series construction, spec changes). That cost is already paid via Databento GLBX.MDP3 and the two-series construction in DATA_MODEL.md. Futures research is not cheaper than ETF research; the cost is capitalized rather than absent.
+
+Futures sizing at $50k: prefer CME micros (MES, MNQ, M2K, MYM, MGC, MCL) where full-size contract risk is too large a fraction of the account. This is a sizing guideline, not a universe restriction. Two exceptions: (a) rates should be sized on DV01, not notional, and full-size ZN or ZF may be appropriate at $50k; (b) CME Micro Treasury Yield futures (2YY/5YY/10Y/30Y) are yield-settled with fixed $10/bp DV01 and are a structurally different instrument from ZN, not a smaller version of it. Do not substitute one for the other.
+
+Cboe products: VIX futures (VX, VXM) are listed on CFE, not CME, and remain in scope. Single-instrument vol term-structure strategies are explicitly listed as a fitting family above.
+
+Live-side requirement: ETFs still generate position changes not caused by fills (splits, reverse splits, fund mergers). Startup and periodic position reconciliation against broker-reported positions is required regardless of this constraint.
+
+Re-entry condition: this constraint lifts only on an explicit decision to fund a delisting-inclusive data source (Norgate, Sharadar, or equivalent) plus the point-in-time universe builder and permanent-identifier keying listed as Non-Goals in MULTI_STRATEGY_REFACTOR.md. Until then, a candidate requiring individual company shares is killed at framing, before any data work.
+
+See `UNIVERSE.md` for the standing admissibility fence: the tiered list of instruments this rule currently admits, with data-depth and structural-continuity notes per instrument. This section owns the rule; `UNIVERSE.md` owns the list.
+
+---
+
 ## Multi-Strategy Operation
 
 PaperStreet is designed to run multiple single-symbol strategies concurrently. Each strategy instance trades one symbol (existing constraint). Portfolio-level diversification emerges from running several uncorrelated strategies in parallel — not from any single strategy being internally diversified. 
@@ -91,7 +118,8 @@ inputs and cannot be used interchangeably:
   `on_bars` and emit a list of `OrderRequest`s. This is the default family.
 - **Quoting strategies** (`strategy/base_quoting_strategy.py::BaseQuotingStrategy`) — consume
   fair-value estimates via `on_estimates` and return a per-symbol mapping of two-sided quote
-  dicts (e.g. the ERCOT market maker).
+  dicts (e.g. an ERCOT market maker, which lives in the private working repo and is not
+  included in this mirror).
 
 ### Symbol universe — single-symbol is N=1
 
@@ -237,8 +265,8 @@ with a decorator:
 @register_strategy("spy_short_reversal")    # bar family
 class SpyShortReversalStrategy(BaseStrategy): ...
 
-@register_quoting_strategy("ercot_market_making")   # quoting family
-class ERCOTMarketMakingStrategy(BaseQuotingStrategy): ...
+@register_quoting_strategy("my_quoting_strategy")   # quoting family
+class MyQuotingStrategy(BaseQuotingStrategy): ...
 ```
 
 `strategy/__init__.py` imports every concrete module so the registries are populated on
@@ -256,7 +284,7 @@ edits when swapping.
 
 ## Naming and File Conventions
 
-- Each strategy lives in its own file under `strategy/in_progress/`, `strategy/parked/`, or `strategy/` (for utilities like benchmarks)
+- Each strategy lives in its own file under `strategy/parked/` or `strategy/` (for utilities like benchmarks). The private working repo also has `strategy/in_progress/` for strategies not yet killed or shipped; it is left out of this mirror.
 - File name matches strategy class name in snake_case
 - Strategy `name` must be unique across all strategies — it is the registry key and tags
   orders/executions in the database. The `@register_*` decorator sets `cls.name` for you.
@@ -300,7 +328,7 @@ _(Update this section as research progresses.)_
 
 | Strategy | Status | Notes |
 |---|---|---|
-| `spy_short_reversal` | **Parked at §7 OOS** | RSI(2)<10 + SMA(200) filter, exit close>SMA(5), single-entry long-only. OOS Sharpe 0.52 failed to beat timing_sma (0.63) or buy_and_hold (0.70). Code reusable; candidate parked. See `research/research_notes/short_reversal_strategy_notes.md`. |
+| `spy_short_reversal` | **Parked at §7 OOS** | RSI(2)<10 + SMA(200) filter, exit close>SMA(5), single-entry long-only. OOS Sharpe 0.52 failed to beat timing_sma (0.63) or buy_and_hold (0.70). Code reusable; candidate parked. See `research/killed/research_notes/short_reversal_strategy_notes.md`. |
 | `buy_and_hold`, `timing_sma` | Benchmarks | Evaluation baselines in `strategy/benchmarks.py` (not trading candidates) — run through the same engine for apples-to-apples comparison. `timing_sma` (long while close>SMA(n)) is the *binding* benchmark for long-only timing-overlay strategies. |
 | _regime candidate (none active)_ | Family note | Optional branch — see "Regime-Switching and Adaptive Strategies". Single-symbol discrete state-switching is in scope; validate with the methods toolbox in `BACKTESTING.md`, benchmark against the *unconditional* strategy. |
 

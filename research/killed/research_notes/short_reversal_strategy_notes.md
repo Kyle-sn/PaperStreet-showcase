@@ -7,7 +7,7 @@
 | **Status** | **PARKED** — §7 OOS one-shot **FAILED** the binding gate (does not beat the 200-day timing-only baseline OOS; crowding decay per §1). Workflow complete; no §8/§9. |
 | **Instrument** | SPY (primary); QQQ deferred (see §2) |
 | **Horizon** | Days-scale; 1–5 day holds (overnight, not intraday) |
-| **Doc location** | `research/research_notes/short_reversal_strategy_notes.md` (authoritative) |
+| **Doc location** | `research/killed/research_notes/short_reversal_strategy_notes.md` (authoritative) |
 | **Related docs** | `STRATEGY.md`, `BACKTESTING.md`, `RISK.md`, `strategy/README.md` |
 
 This doc follows the standard 9-step research template, **prepended with a Step 0** that
@@ -32,19 +32,19 @@ list as decisions are made; treat resolved decisions as settled.
 
 ## 0. Research Environment (build fresh — engineering setup, not research)
 
-**Assume there is no usable research environment.** The legacy `research/explore.ipynb` and its
+**Assume there is no usable research environment.** The legacy `research/explore.ipynb` (since removed) and its
 Random-Forest / parameter-optimization pipeline are **stale scaffolding from earlier work and are
 not to be trusted, extended, or imported.** Start clean for this candidate.
 
 > **Exception (verification finding): `research/session.py` is NOT stale.** It is load-bearing
 > for the live system — imported by `run_live.py`, `backtesting/data.py`, and
-> `market_data/test_market_data.py`. Reuse it as the sanctioned connect path; do **not** avoid or
+> `market_data/test_market_data.py` (private repo only). Reuse it as the sanctioned connect path; do **not** avoid or
 > reimplement it. "Treat `research/` as stale" applies only to the legacy notebook/RF pipeline,
 > not to `session.py`.
 
 Rules for the scaffold:
 
-- **Build a fresh, candidate-specific notebook** — `research/spy_short_reversal/notebook.ipynb` (built;
+- **Build a fresh, candidate-specific notebook** — `research/killed/spy_short_reversal/notebook.ipynb` (built;
   self-contained, executed, cache-first so it re-runs offline). Do not graft onto the old notebook.
 - **Leave the old files in place.** Do not delete legacy files — that's a separate cleanup
   decision (scratch builders created during §3 were removed; the legacy pipeline was left untouched).
@@ -171,7 +171,7 @@ published edge (see §7).
 
 ---
 
-## 3. Signal in the Notebook (fresh `research/spy_short_reversal/notebook.ipynb`)
+## 3. Signal in the Notebook (fresh `research/killed/spy_short_reversal/notebook.ipynb`)
 
 Characterize the **signal** before building the strategy wrapper, in the fresh notebook from §0
 (not the legacy pipeline). Per the signal-vs-strategy distinction: for mean reversion the signal
@@ -282,9 +282,9 @@ Commit the exact comparison metric in Open Decisions before looking.
 
 ### §4 outcome (in-sample 1996–2014, ADJUSTED_LAST, $50k, next-open + cost) — PASS
 
-Implemented as `strategy/spy_short_reversal.py` (net-new, RSI-based; `WilderRSI` in
+Implemented as `strategy/spy_short_reversal.py` (since moved to `strategy/parked/`; net-new, RSI-based; `WilderRSI` in
 `strategy/indicators.py` is validated bit-for-bit against the §3 notebook RSI — max abs diff 0.0,
-n=229 matches). Backtest is reproducible offline: `research/spy_short_reversal/is_backtest.py`
+n=229 matches). Backtest is reproducible offline: `research/killed/spy_short_reversal/is_backtest.py`
 seeds **IS-only** ADJUSTED_LAST bars into the cache (OOS literally absent) and runs the three-way
 comparison through `run_backtest`. Parity fix (configurable `whatToShow`, default `TRADES`) landed
 first — see Decision #2/#12 and `IBKR_NOTES.md`.
@@ -334,7 +334,7 @@ changes; an edge that exists only at one combination is overfit.
 
 ### §5 outcome (in-sample 1996–2014, ADJUSTED_LAST, $50k) — frozen point = PLATEAU
 
-Reproducible offline via `research/spy_short_reversal/sensitivity.py` (IS-only cache seed
+Reproducible offline via `research/killed/spy_short_reversal/sensitivity.py` (IS-only cache seed
 reused from §4; OOS literally absent). The frozen spec is **unchanged** — §5 tests robustness,
 it does **not** re-pick the spec, even where the sweep surfaced a higher-IS-Sharpe cell.
 
@@ -486,7 +486,7 @@ reversion edge, and is parked on that basis.
 
 ### §7 outcome (OOS one-shot, 2015-01-01 → 2026-06-12, ADJUSTED_LAST, $50k) — FAIL → PARK
 
-Run once via `research/spy_short_reversal/oos_backtest.py` (frozen spec unchanged; gates G1–G5
+Run once via `research/killed/spy_short_reversal/oos_backtest.py` (frozen spec unchanged; gates G1–G5
 locked **before** this executed; convention (b), all three legs; indicators primed on a 2013-06-01
 warmup slice, metrics measured on the 2015+ slice only). **No re-tuning — one shot, honored.**
 

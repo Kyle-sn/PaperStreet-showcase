@@ -97,7 +97,6 @@ Point-in-time snapshots of the account summary, written on every `accountDownloa
 CREATE TABLE account_snapshots (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     account             TEXT    NOT NULL,
-    captured_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     cash_balance        REAL,
     net_liquidation     REAL,
     gross_position_value REAL,
@@ -106,7 +105,8 @@ CREATE TABLE account_snapshots (
     maintenance_margin  REAL,
     initial_margin      REAL,
     realized_pnl        REAL,
-    unrealized_pnl      REAL
+    unrealized_pnl      REAL,
+    snapshot_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 ```
 
@@ -119,46 +119,62 @@ This creates a time series of position state — useful for PnL attribution and 
 CREATE TABLE position_snapshots (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     account         TEXT    NOT NULL,
-    symbol          TEXT    NOT NULL,
-    captured_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    position        REAL    NOT NULL,
-    sec_type        TEXT,
-    currency        TEXT,
     con_id          INTEGER,
+    symbol          TEXT    NOT NULL,
+    sec_type        TEXT    NOT NULL DEFAULT 'STK',
+    currency        TEXT    NOT NULL DEFAULT 'USD',
+    position        REAL    NOT NULL,
     market_price    REAL,
     market_value    REAL,
     average_cost    REAL,
     unrealized_pnl  REAL,
-    realized_pnl    REAL
+    realized_pnl    REAL,
+    snapshot_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 ```
 
 ### `orders`
 
 One row per order submitted to IBKR. Written at order submission time; updated as `orderStatus`
-callbacks arrive.
+callbacks arrive, or as `status='REJECTED'` from `ib_app.py::error()` if IBKR rejects the order at
+submission-time validation (e.g. error 321, Read-Only API) — those never reach `orderStatus` at all.
+
+`ib_order_id` resets to 1 on every Gateway restart, so distinct orders from different sessions
+can share the same value.
+`get_order_db_id()` and `update_order_status_by_ib_id()` now check `ib_perm_id` (globally
+unique) first, falling back to `ib_order_id` only to resolve the *initial* correlation before
+a perm id is known — and even then matching the most recently created row with that id, since
+a row is always inserted immediately before `placeOrder()`, never any older row that happens
+to share it. `update_order_status_only()` (used by `openOrder()`'s startup self-heal) patches
+just `status`/`ib_perm_id` without touching fill bookkeeping fields it doesn't have data for.
 
 ```sql
 CREATE TABLE orders (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    ib_order_id         INTEGER UNIQUE NOT NULL,   -- client-assigned orderId
-    ib_perm_id          INTEGER,                   -- IBKR permanent ID (set after submission)
+    ib_order_id         INTEGER,                    -- client-assigned orderId; nullable, not unique (IB assigns per-connection); resets to 1 on every Gateway restart
+    ib_perm_id          INTEGER,                    -- IBKR permanent ID (set after submission) -- globally unique; the correlation key once known, see note above
+    ib_parent_id        INTEGER,
     symbol              TEXT    NOT NULL,
-    sec_type            TEXT,
-    side                TEXT    NOT NULL,           -- 'BUY' or 'SELL'
+    sec_type            TEXT    NOT NULL DEFAULT 'STK',
+    action              TEXT    NOT NULL,           -- 'BUY' or 'SELL'
     order_type          TEXT    NOT NULL,           -- 'MKT', 'LMT', etc.
+    tif                 TEXT    NOT NULL DEFAULT 'DAY',
     quantity            REAL    NOT NULL,
     limit_price         REAL,
-    status              TEXT,                       -- last known IBKR status string
-    filled_quantity     REAL,
+    stop_price          REAL,
+    trail_percent       REAL,
+    trail_amount        REAL,
+    outside_rth         INTEGER NOT NULL DEFAULT 0,
+    status              TEXT    NOT NULL DEFAULT 'PENDING',
+    filled_quantity     REAL    NOT NULL DEFAULT 0,
     remaining_quantity  REAL,
     avg_fill_price      REAL,
     last_fill_price     REAL,
     why_held            TEXT,
-    strategy            TEXT,                       -- strategy name that originated the order
+    strategy_name       TEXT,                       -- strategy name that originated the order
     trade_group_id      TEXT,                       -- logical trade this order belongs to (trades.trade_group_id); nullable
-    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 ```
 
@@ -177,23 +193,23 @@ One row per execution (partial or full fill). Linked to `orders` via `order_id`.
 CREATE TABLE executions (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id            INTEGER REFERENCES orders(id),
-    ib_exec_id          TEXT    UNIQUE NOT NULL,   -- IBKR execution ID
-    ib_order_id         INTEGER NOT NULL,
-    symbol              TEXT    NOT NULL,
-    sec_type            TEXT,
+    ib_exec_id          TEXT    UNIQUE,             -- IBKR execution ID
+    ib_order_id         INTEGER,
     account             TEXT,
+    symbol              TEXT    NOT NULL,
+    sec_type            TEXT    NOT NULL DEFAULT 'STK',
     side                TEXT    NOT NULL,           -- 'BOT' or 'SLD' (IBKR convention)
     shares              REAL    NOT NULL,
     price               REAL    NOT NULL,
-    avg_price           REAL,
     cum_qty             REAL,
-    executed_at         DATETIME NOT NULL,
-    exchange            TEXT,
-    liquidation         BOOLEAN NOT NULL DEFAULT FALSE,
+    avg_price           REAL,
     commission          REAL,
     commission_currency TEXT,
     realized_pnl        REAL,
-    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    liquidation         INTEGER NOT NULL DEFAULT 0,
+    exchange            TEXT,
+    executed_at         TEXT    NOT NULL,
+    created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 ```
 
@@ -240,8 +256,11 @@ with a rejected leg — `MULTI_STRATEGY_REFACTOR.md` Open Decision #4); nothing 
 
 Historical and live bar data stored by `market_data/`. Enables backtesting without re-fetching
 from IBKR and provides a local history for signal computation on reconnect. `what_to_show` is
-part of the unique key (TRADES vs ADJUSTED_LAST series coexist) — see `CONVENTIONS.md` → Data
+part of the unique key (TRADES vs ADJUSTED_LAST series coexist) — see `BACKTESTING.md` → Data
 basis for the convention.
+
+IBKR equity history is survivor-only — see `STRATEGY.md` → Instrument Universe Constraint for
+why individual company shares are out of scope regardless of `what_to_show`.
 
 ```sql
 CREATE TABLE market_data_bars (
@@ -282,6 +301,26 @@ live IBKR pull.
 
 All incoming `bar_datetime` values are normalized to canonical ISO 8601 at write time
 (`_normalize_bar_datetime`) so the UNIQUE key dedups correctly regardless of caller format.
+
+### `strategy_signals`
+
+Every signal a strategy emits, including no-ops (`action IS NULL`). Linked to the resulting
+order (if any) via `order_id` once that order is placed.
+
+```sql
+CREATE TABLE strategy_signals (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_name TEXT NOT NULL,
+    symbol        TEXT NOT NULL,
+    action        TEXT,                        -- 'BUY', 'SELL', or NULL for a no-op
+    quantity      INTEGER,
+    bar_datetime  TEXT,
+    bar_close     REAL,
+    executed      INTEGER NOT NULL DEFAULT 0,
+    order_id      INTEGER REFERENCES orders(id),
+    signal_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+```
 
 ---
 
@@ -413,6 +452,16 @@ only as derived artifacts, never the primary store.
 Separate SQLite at `data/futures_research.db` (research layer only, not
 production). Built by `python -m research.killed.diversified_trend.build_continuous`
 from raw Databento .dbn.zst files. Schema:
+
+**Rebuild:** fully reconstructible, no re-billing required — this file is a derived
+cache, not a source. To rebuild from scratch:
+1. Confirm the raw files under `data/raw/databento/` are intact against
+   `data/raw/MANIFEST` (per-file SHA-256, vendor-verified at pull time).
+2. Delete the existing `data/futures_research.db` (or point elsewhere).
+3. Re-run `python -m research.killed.diversified_trend.build_continuous` (needs
+   `requirements-research.txt` installed).
+See `DEPLOYMENT.md` §6.4 for how this fits the broader authoritative /
+reconstructible / irreplaceable data classification.
 
 ### `futures_contracts`
 Contract metadata: raw_symbol, root, expiration, delivery_month, multiplier,

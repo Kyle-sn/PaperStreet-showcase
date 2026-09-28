@@ -66,6 +66,29 @@ def request_open_orders(app):
     app.reqOpenOrders()
 
 
+def reconcile_open_orders(app, symbol: str, timeout: float = 10) -> dict | None:
+    """Ask IBKR for this client's working orders and return the one for `symbol`, if any.
+
+    Call once at engine startup, before evaluating the first signal. Fixes the
+    duplicate-order risk from a process restart while an order is still
+    working (PreSubmitted/Submitted, not yet filled): position-based dedup
+    alone can't see it, since an unfilled order doesn't change `get_position()`
+    (DEPLOYMENT.md §6.1; ROADMAP.md "Order-state reconciliation on restart").
+    Blocks up to `timeout` seconds for IBKR's openOrderEnd(); returns None on
+    timeout (treated as "no working orders", the same as a clean start).
+    """
+    app._open_order_end_event.clear()
+    request_open_orders(app)
+    if not app._open_order_end_event.wait(timeout):
+        logger.warning("Timed out waiting for openOrderEnd during startup reconciliation")
+    matches = [o for o in app.open_orders.values() if o["symbol"] == symbol]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        logger.warning(f"Multiple working orders found for {symbol} at startup: {matches}")
+    return matches[0]
+
+
 def request_completed_orders(app):
     """
     Call this function to request the completed orders. If apiOnly parameter

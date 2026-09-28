@@ -5,12 +5,12 @@
 > suggestive tail effect is overnight-gap momentum, and the tail sign inverts at the 30/90-min
 > windows. Per the workflow's anti-pattern rule the project stops — no re-bucketing, no hypothesis
 > pivot, and **OOS (2022–2025) is never opened**. See the Step 3 verdict below. The diversified-trend
-> strategy (`research/research_notes/RESEARCH_WORKFLOW_diversified_trend.md`) has been resumed as
+> strategy (`research/killed/research_notes/RESEARCH_WORKFLOW_diversified_trend.md`) has been resumed as
 > ACTIVE (2026-06-19).
 
 Research plan for an intraday strategy that uses the first hour of US equity trading as a
 signal and expresses the resulting trade in the remainder of the session. Follows the same
-step structure as `research/research_notes/RESEARCH_WORKFLOW_diversified_trend.md`.
+step structure as `research/killed/research_notes/RESEARCH_WORKFLOW_diversified_trend.md`.
 
 ---
 
@@ -19,7 +19,7 @@ step structure as `research/research_notes/RESEARCH_WORKFLOW_diversified_trend.m
 **Step 3 — Signal EDA (COMPLETE → STOP).** Pure EDA on IS (2015–2021) QQQ 5-min bars; OOS
 untouched. The H1 conditional structure is absent: non-monotonic cross-tab, every bucket |t| < 1.3,
 gap-momentum confound, and tail-sign inversion across the 30/60/90-min windows. **Project stopped at
-Step 3.** Code + plots in `research/intraday_conditional/` (`eda.py`, `notebook.ipynb`, `plots/`).
+Step 3.** Code + plots in `research/killed/intraday_conditional/` (`eda.py`, `notebook.ipynb`, `plots/`).
 Full verdict in the Step 3 section below.
 
 **Step 2 — Universe and Data (COMPLETE).** 224,552 QQQ 5-min bars loaded into
@@ -119,7 +119,7 @@ Tracked here until resolved. Each should be closed before the step that depends 
       into close. No profit target, no stop, no VWAP cross — no extra parameters.
 - [x] **Half-day sessions → dropped and labeled.** The strategy's exit assumes a full
       session; half-days (1 PM ET close) are identified empirically from bar counts (42
-      bars vs 78), exported to `research/intraday_conditional/half_days.json`, and excluded
+      bars vs 78), exported to `research/killed/intraday_conditional/half_days.json`, and excluded
       in both backtest and live. Identification is a quality-check output
       (`quality_checks.py`).
 - [x] **Universe → QQQ only.** SPY dropped (~0.9 correlated, nearly the same trade twice;
@@ -176,7 +176,7 @@ the `what_to_show` cache-key convention so it never collides with another series
 **Data source.** IBKR (sole source). Probe confirmed QQQ 5-min bars back to 2014-01-02.
 224,552 bars fetched in 138 monthly chunks. Free, and backtest/live share one source.
 
-**Implementation.** `research/intraday_conditional/`:
+**Implementation.** `research/killed/intraday_conditional/`:
 - `fetch_5min_bars.py probe` — walks IBKR backward to find the earliest reachable date
 - `fetch_5min_bars.py fetch` — pulls monthly chunks from IBKR into `market_data_bars`
 - `fetch_5min_bars.py load_csv PATH` — loads external CSV (FirstRate/Polygon format)
@@ -199,7 +199,7 @@ currently US/Central).
 **Quality check results (2026-06-18):**
 - 224,552 bars, 2,891 trading days (2014-01-02 → 2026-06-18)
 - 2,863 full days (78 bars), 24 half-days (42 bars), 4 anomalous (IBKR gaps)
-- Half-days and incomplete days exported to `research/intraday_conditional/half_days.json`
+- Half-days and incomplete days exported to `research/killed/intraday_conditional/half_days.json`
 - DST: PASS — 08:30 CT first bar on all 23 transition Mondays
 - Anomalous days (late open, partial session): 2017-01-05, 2018-09-17, 2019-08-05,
   2019-09-13 — all in IS window. Drop alongside half-days.
@@ -265,8 +265,8 @@ saved alongside the notebook.
 
 Pure EDA, IS-only (2015-01-01 → 2021-12-31, 1,733 valid full days after dropping half-days and
 IBKR-gap days), OOS never loaded (SQL hard-bounded `< 2022-01-01`; runtime-asserted). 2014 used as
-warm-up only. Code: `research/intraday_conditional/eda.py` (workhorse) + `notebook.ipynb`
-(narrative); plots in `research/intraday_conditional/plots/`.
+warm-up only. Code: `research/killed/intraday_conditional/eda.py` (workhorse) + `notebook.ipynb`
+(narrative); plots in `research/killed/intraday_conditional/plots/`.
 
 **Committed feature definitions (locked here for any future reuse).**
 - **Bar-edge convention.** IBKR 5-min bars are START-labeled and stored in US/Central; converted to
@@ -497,7 +497,7 @@ The decision to scale is operational and statistical, not a P&L vote.
 
 ## Handoff summary for Claude Code
 
-Step 2 infrastructure is built in `research/intraday_conditional/`:
+Step 2 infrastructure is built in `research/killed/intraday_conditional/`:
 - `fetch_5min_bars.py` — IBKR probe, IBKR fetch (monthly walk-back), external CSV loader
 - `quality_checks.py` — RTH gap check, half-day detection, DST check, Yahoo spot-check,
   cross-source parity
@@ -520,7 +520,7 @@ The `IBKRMarketDataClient` was extended with `end_date_time` and `timeout` param
   convention, point-in-time trailing-20-day ATR, `m=|r_1h|/ATR`, signed `r_rod`) and the fixed
   sextile bucket scheme. H1 rejected: non-monotonic cross-tab with every bucket |t| < 1.3,
   gap-momentum confound, and tail-sign inversion across 30/60/90-min windows. Project stopped — no
-  backtest, no pivot. Code/plots: `research/intraday_conditional/{eda.py,notebook.ipynb,plots/}`,
+  backtest, no pivot. Code/plots: `research/killed/intraday_conditional/{eda.py,notebook.ipynb,plots/}`,
   `README.md`. First-hour-window open decision closed; sizing/cost/PDT decisions moot.
 - 2026-06-18 — **Step 2 COMPLETE.** Universe locked to QQQ only; bar size = 5-min;
   IS/OOS split committed (2015–2021 / 2022–2025); exit rule = time-only one-bar-early;

@@ -51,7 +51,6 @@ import time
 
 import ib_app as ib_app_module
 from market_data.market_data_service import MarketDataService
-from positions.position_handler import request_account_updates
 from utils.connection_constants import (
     BROKER_CONNECTION_IP,
     BROKER_CONNECTION_PORT,
@@ -116,7 +115,7 @@ class Session:
 
         if self._account:
             logger.info(f"Subscribing to account updates for {self._account}")
-            request_account_updates(self._app, self._account)
+            self._app.reqAccountUpdates(True, self._account)
 
         logger.info("Session ready.")
 
@@ -250,6 +249,25 @@ class Session:
         self._app = None
         self.market_data = None
         logger.info("Session disconnected.")
+
+    def reconnect(self):
+        """
+        Tear down the current connection (if any) and re-establish it from
+        scratch: a brand-new IBApp, a new event-loop thread, a fresh
+        nextValidId handshake, and a fresh account-update subscription.
+
+        A new IBApp starts with empty positions/account state and
+        last_heartbeat=None, so nothing carries over from before the drop --
+        real broker callbacks have to repopulate it, which happens as part of
+        this call (DEPLOYMENT.md §6.1, broker is source of truth). Until they
+        do, the RiskGate's ConnectionLivenessRule (risk/rules.py) already
+        blocks order placement on the stale/absent heartbeat, so callers
+        don't need to wait here before resuming the loop.
+        """
+        logger.info("Session reconnecting to TWS...")
+        if self._app is not None and self._app.isConnected():
+            self._app.disconnect()
+        self._connect()
 
     # ------------------------------------------------------------------
     # Context manager support

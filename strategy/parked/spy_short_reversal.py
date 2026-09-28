@@ -9,7 +9,7 @@ is a different signal. This strategy is RSI-based with a long-term trend gate.
 
 Research provenance
 -------------------
-Implements "Option A" frozen in research/research_notes/short_reversal_strategy_notes.md
+Implements "Option A" frozen in research/killed/research_notes/short_reversal_strategy_notes.md
 after §3 signal characterization (gate = GO, in-sample 1996-2014, ADJUSTED_LAST
 total-return basis). The RSI(2) here reproduces the notebook's signal exactly
 (strategy.indicators.WilderRSI is validated bit-for-bit against the notebook's
@@ -49,7 +49,7 @@ STATUS: PARKED at §7 OOS (2026-06-14)
 Failed the binding OOS gate: 2015+ Sharpe 0.52 does not beat timing_sma (0.63)
 or buy_and_hold (0.70). The reversion entry adds nothing OOS; it's a 200-day
 timer with extra steps. One-shot honored — no re-tune.
-See research/research_notes/short_reversal_strategy_notes.md §7.
+See research/killed/research_notes/short_reversal_strategy_notes.md §7.
 """
 
 from __future__ import annotations

@@ -1,0 +1,9 @@
+[Unit]
+Description=Run the PaperStreet VM config-drift check daily
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

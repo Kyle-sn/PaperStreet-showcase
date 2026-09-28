@@ -395,12 +395,12 @@ machinery step as the code forces them.
 
 ## 9. Machinery step — status & known-good readout
 
-The Stage-0 machinery is built as a proper module (`research/basket_statarb/`, not a notebook) and
+The Stage-0 machinery is built as a proper module (`research/killed/basket_statarb/`, not a notebook) and
 validated on the known-good basket. Implements Steps 2–3 (data, weights, spread, screens) and the
 Step-4 research-tier sim; **no candidate cluster, IS/OOS split, or gate is run here** — those are
 Steps 4–7 (separate task).
 
-### Modules (`research/basket_statarb/`)
+### Modules (`research/killed/basket_statarb/`)
 
 | Module | Responsibility |
 |---|---|

@@ -2,7 +2,7 @@
 
 Research-tier package for the overnight-drift candidate (long the closing→opening session, flat
 intraday). Workflow + hypothesis + kill criteria:
-`research/research_notes/RESEARCH_WORKFLOW_overnight_drift.md`.
+`research/killed/research_notes/RESEARCH_WORKFLOW_overnight_drift.md`.
 
 **Scope of this package (Step 2 only):** data load + dividend calendar + quality checks. No EDA, no
 overnight-return computation, no strategy/engine code — those are gated Step 3+ handoffs.
@@ -30,7 +30,7 @@ all in-sample.
 - Source = **IBKR daily**, full depth.
 - IS = **1993-01-29 → 2018-12-31**, OOS = **2019-01-01 → present**. Committed, no OOS iteration.
 - Structure = **long-overnight-only**. Cash = **excess-over-3M-T-bill**, reusing
-  `research/spy_short_reversal/sensitivity.py::TB3MS_ANNUAL_PCT` (single authoritative series).
+  `research/killed/spy_short_reversal/sensitivity.py::TB3MS_ANNUAL_PCT` (single authoritative series).
 
 ## Dividend calendar — method & validation
 Derived by differencing the two cached IBKR series: `div(ex) = close(ex-1) · (adj_ret − px_ret)` on

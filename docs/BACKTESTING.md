@@ -157,16 +157,38 @@ A backtest run should produce at minimum:
 
 ### Cash convention (idle cash and the Sharpe risk-free rate)
 
-See `CONVENTIONS.md` → Cash / risk-free convention for the definition and rationale.
+Two related, separable choices:
+
+- **How idle cash is credited in the equity curve.** `Portfolio.mark` holds uninvested cash at
+  **0%** — when a strategy is flat its equity is flat. This is the current default and is what the
+  metrics are computed on.
+- **The risk-free rate in the Sharpe numerator.** `compute_metrics(..., risk_free_rate=r)` (annual,
+  default `0.0`) subtracts a per-bar `r / periods_per_year` from each bar return ("excess over
+  cash"). Default `0.0` keeps the historical behavior, which is *self-consistent* with idle cash at
+  0% (the realized cash return is 0%, so excess-over-cash = raw return).
+
+These two must agree to be meaningful: a genuine excess-over-cash Sharpe credits idle cash at the
+same rate it subtracts as `risk_free_rate`. When they agree, **the Sharpe ratio is nearly invariant
+to the cash convention** — only *absolute* return moves (materially so for a strategy that sits in
+cash most of the time). So the cash convention is the dominant lever for annualized return, **not**
+for Sharpe. Worked both-ways comparison: `research/killed/spy_short_reversal/sensitivity.py` (§5 Task 0 of
+the SPY short-reversal notes).
 
 ---
 
 ## Benchmarking
 
-See `CONVENTIONS.md` → Benchmark-attribution principle for the binding-benchmark rule.
+**Benchmark-attribution principle.** The binding benchmark is always the candidate with the one
+component whose contribution is in question removed — beating buy-and-hold but not *that*
+benchmark means the removed component did the work, not the signal under test.
+
+For a long-only strategy that pulls to cash below a trend filter, that's `timing_sma` (entry signal
+removed, timing kept): does the signal beat a pure trend timer? For a regime-gated strategy it's the
+unconditional strategy (gate removed, signal kept): does conditioning beat always-on? Commit the
+comparison metric (Sharpe, drawdown) **before** looking.
 
 A strategy's metrics mean nothing in isolation — they must beat doing something simpler.
-`strategy/active/benchmarks.py` provides two baselines that run through the **same** engine, broker,
+`strategy/benchmarks.py` provides two baselines that run through the **same** engine, broker,
 and cost model (so the comparison is apples-to-apples, not a hand-rolled equity curve):
 
 - **`buy_and_hold`** — always invested. Usually the highest raw return (it compounds and never
@@ -175,13 +197,29 @@ and cost model (so the comparison is apples-to-apples, not a hand-rolled equity 
   signal. For any long-only strategy that pulls to cash below a trend filter, this is the
   **binding** benchmark — attribute the edge to the signal by subtracting the timing-only baseline.
 
-Worked example: `research/spy_short_reversal/is_backtest.py` runs the three-way
+Worked example: `research/killed/spy_short_reversal/is_backtest.py` runs the three-way
 (candidate / buy-and-hold / timing-only) comparison on one ADJUSTED_LAST basis.
 
 ## Data basis (`what_to_show`)
 
-`BacktestConfig.what_to_show` selects the data series. See `CONVENTIONS.md` → Data basis for the
-TRADES-vs-ADJUSTED_LAST convention; see `IBKR_NOTES.md` for the IBKR API parameter itself.
+`BacktestConfig.what_to_show` selects the data series. `"TRADES"` (split-adjusted only, price
+return) is the project default; `"ADJUSTED_LAST"` (split *and* dividend adjusted, total-return) is
+opt-in per strategy. For SPY the TRADES/ADJUSTED_LAST ratio runs ~1.45→1.00 over 1996→2026 —
+price-return drops the entire dividend stream.
+
+`what_to_show` is a first-class, configurable parameter (not a hardcoded constant): it threads
+through the IBKR request and cache upsert, `MarketDataService.get_*`, `BacktestConfig.what_to_show`,
+and the `run_live.py` fetch. It is also part of the `market_data_bars` cache key, so a TRADES
+series and an ADJUSTED_LAST series for the same symbol/bar_size coexist without colliding.
+
+**Keep research, backtest, and live on one basis per strategy.** Return-based signals (RSI, SMA)
+barely move between bases, but the equity curve and any total-return benchmark are off by the whole
+dividend stream if research/backtest/live don't agree — live fills at raw price plus
+dividends-as-cash sum to the same total return the adjusted backtest shows. A deviation from this
+(e.g. `overnight_drift`'s TRADES-plus-explicit-dividend-overlay basis) must be justified and
+documented at the basis's configuration site.
+
+See `IBKR_NOTES.md` for the IBKR API parameter itself.
 
 ## Validation methods (select by strategy structure)
 
@@ -228,6 +266,75 @@ held-out shot** under every method.
 > event-loop replay over time partitions, purging the boundary bars whose signal/label
 > windows straddle a split, plus per-regime metric aggregation. That is a real build, gated
 > on a regime candidate actually existing — do not build it speculatively.
+
+### Free parameters: pre-declared selection vs post-hoc re-tuning
+
+"Parameter sensitivity, NOT optimization" (used throughout the `RESEARCH_WORKFLOW_*.md` docs)
+collapses two different rules. Split apart:
+
+- **(a) PROHIBITED — re-tuning after seeing a result.** Adjusting a parameter, especially
+  after a gate fails, is the anti-pivot rule: the fixed historical sample has already been
+  queried, and re-querying it is unaccounted multiple comparisons. This is what the
+  Parameter Sensitivity step in every existing workflow doc guards against, and it still
+  applies in full.
+- **(b) PERMITTED — selecting a parameter that was never pinned a priori.** A candidate can
+  have a genuinely free parameter with no canonical or structurally-defensible value (unlike
+  `spy_short_reversal`, which adopted published Connors values in Step 3 and so never had one
+  to select). Selecting such a parameter is not optimization **provided the search is
+  declared before any data is touched and the trial count is carried** — it is a one-time
+  specification choice, not a re-tuning loop.
+
+**Requirements for (b):**
+
+- The free parameter is named in the candidate's **Step 3 (Signal)** framing, not introduced
+  at Step 5. See the copy-in block below.
+- The grid is pre-committed and **coarse**. Adjacent cells at spacing finer than the
+  parameter's economic resolution are not independent tests — they inflate the trial count
+  for no information.
+- The **selection rule** is pre-committed in writing (e.g. plateau center, or median cell of
+  the grid) **before the surface is viewed**. Choosing the selection rule after seeing the
+  surface reintroduces exactly the bias the pre-commitment exists to prevent.
+- The **full grid is reported** in the workflow doc, not the max cell — follow the 4x4 table
+  format already used in `short_reversal_strategy_notes.md` §5 (the `rsi_entry ×
+  sma_trend` grid).
+- **Trial count N for the deflated Sharpe includes every axis searched across the whole
+  candidate**, not just the final grid — see "Deflated Sharpe / multiple-testing correction"
+  above.
+- A pre-committed **total IS trial budget**. Default: 30-50 for a single-symbol daily
+  candidate, set per candidate, not a hard rule.
+- **Step 5 then confirms the selected point sits on a plateau.** It still does not re-pick
+  the spec — the same plateau-not-spike test applies to a pre-declared free parameter as to
+  any other.
+
+All of this lives inside the IS window; the terminal OOS one-shot is unchanged — consistent
+with every validation method above operating within IS.
+
+Risk-control parameters (stops, caps, vol targets) are a related but separate case — see
+`docs/RISK.md` → "Tail-Control Parameter Selection: Drawdown Budget, Not Sharpe." They are
+selected against a drawdown budget, not this Sharpe-plateau rule.
+
+#### Free-parameter declaration block
+
+No standard (non-regime) `RESEARCH_WORKFLOW` template file exists yet to host this natively —
+the only copy-in template in the repo, `RESEARCH_WORKFLOW_regime_template.md`, is an explicit
+regime-only addendum. Until a standard template exists, copy the block below directly into a
+candidate's own Step 3 (Signal); it follows the same blockquoted, angle-bracket-placeholder
+pattern as the `[REGIME BRANCH]` blocks in that file.
+
+Copy this block into Step 3 when the candidate has a parameter with no a-priori value.
+**A candidate with zero free parameters omits this block entirely** — and adopting a
+published or canonical value (as `spy_short_reversal` did) is the preferred path whenever
+one exists; only use this block when no such value is available.
+
+> **[FREE PARAMETER]** `<parameter name>` — no a-priori value because `<why no canonical or
+> structural value exists>`.
+>
+> - **Grid (pre-committed, coarse):** `<axis name: v1, v2, v3, ...>`
+> - **Selection objective and rule:** `<metric, e.g. IS Sharpe> / <rule, e.g. plateau center>`,
+>   fixed before the surface is viewed.
+> - **Trial count:** `<N>` cells this axis; running candidate total after this axis: `<N>`.
+> - **Fill/cost sweep:** `<is a fill-model or cost assumption swept as an additional axis? If
+>   yes, name it and say why; if no, say so explicitly.>`
 
 ---
 

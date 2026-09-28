@@ -7,8 +7,30 @@ single-split in-sample backtest plus one-shot OOS remains the default path for e
 candidate. See `docs/STRATEGY.md` → "Regime-Switching and Adaptive Strategies" and
 `docs/BACKTESTING.md` → "Validation methods" for the rationale.
 
-**Canonical step numbering.** See `docs/CONVENTIONS.md` → Step-numbering scheme. Insert each
-block below under its correspondingly-named step.
+**Canonical step numbering (1-indexed).** PaperStreet workflow docs are 1-indexed:
+1 Framing · 2 Universe & Data · 3 Signal · 4 In-Sample Backtest · 5 Parameter Sensitivity ·
+6 Cost Stress · 7 OOS one-shot · 8 Paper · 9 Pre-Live (→ Live). Insert each block below under its
+correspondingly-named step.
+
+The killed `research/killed/research_notes/RESEARCH_WORKFLOW_diversified_trend.md` is 0-indexed and is a
+frozen historical exception — it self-documents its own scheme and is not the template to copy.
+
+---
+
+## Under **Universe and Data** (Step 2)
+
+> **[REGIME BRANCH]** Before enumerating the candidate universe, confirm every instrument —
+> including the regime detector's exogenous variable, not just the in-regime signal's
+> instruments — clears `docs/STRATEGY.md` → "Instrument Universe Constraint": ETFs/ETNs or
+> listed futures only, explicitly enumerated in this doc with rationale and a verified listing
+> history over the full IS+OOS window. A detector keyed to a screened or single-name series
+> carries the same survivorship bias as the signal it gates.
+>
+> Additionally, confirm every instrument (detector and signal alike) is drawn from
+> `docs/UNIVERSE.md` Tier 1 or Tier 2. Tier 1 needs no further comment. Any Tier 2 instrument
+> requires its listed caveat addressed in writing, here, before Step 2 completes — not deferred
+> to the backtest. An instrument absent from `UNIVERSE.md` entirely, or listed in Tier 3, is not
+> admissible without first amending `UNIVERSE.md` per its "Adding to this document" section.
 
 ---
 

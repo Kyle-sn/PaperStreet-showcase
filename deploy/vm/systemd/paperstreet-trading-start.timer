@@ -1,0 +1,9 @@
+[Unit]
+Description=Start PaperStreet for the trading day at 7:30am Central, Mon-Fri
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 07:30:00 America/Chicago
+Persistent=true
+
+[Install]
+WantedBy=timers.target

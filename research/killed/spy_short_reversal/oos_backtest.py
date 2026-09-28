@@ -216,7 +216,7 @@ def main():
     }
     results = {name: run_backtest(_config(name, params[name])) for name in legs}
     # The idle-cash reconstruction is exercised and asserted-against-engine in §5
-    # (research/spy_short_reversal/sensitivity.py); reused verbatim here.
+    # (research/killed/spy_short_reversal/sensitivity.py); reused verbatim here.
 
     print("\n" + "=" * 80)
     print("§7 OOS ONE-SHOT — FROZEN SPEC, convention (b) excess-over-3M-T-bill")

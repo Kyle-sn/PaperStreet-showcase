@@ -1,0 +1,7 @@
+# Dependencies for research/ scripts and the tests that cover them
+# (tests/test_basket_statarb.py). Not needed to run the live engine.
+# Install on top of requirements.txt: pip install -r requirements.txt -r requirements-research.txt
+scipy==1.17.1
+statsmodels==0.15.0
+databento==0.87.0
+yfinance==1.7.0

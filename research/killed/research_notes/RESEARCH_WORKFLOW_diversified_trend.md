@@ -15,7 +15,7 @@
 > progress log and the "Kill rationale" section below.
 >
 > *(Was: ACTIVE, resumed 2026-06-19 under a rebased $5M capital assumption.
-> Supersedes the parked `diversified_trend_strategy_notes.md`. Selected as the
+> Supersedes the parked `diversified_trend_strategy_notes.md` (not retained). Selected as the
 > proof-of-concept first firm-scale strategy because diversified futures trend is
 > the one medium-frequency edge with decades of multi-firm OOS evidence and the
 > correlation structure equities cannot provide.)*
@@ -552,7 +552,7 @@ Two separate tasks, in order:
 
 2. **Stage 0 vectorized notebook (only after universe, signal spec, and kill
    gates are locked here on Desktop).** Portfolio-level trend backtest in
-   `research/diversified_trend/`, integer-rounded contracts, PIT vol, roll +
+   `research/killed/diversified_trend/`, integer-rounded contracts, PIT vol, roll +
    cost model. No production-engine changes. This is the cheap kill gate for the
    whole thesis.
 

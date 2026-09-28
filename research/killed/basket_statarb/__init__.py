@@ -3,9 +3,9 @@ basket_statarb — research-tier machinery for cointegrated-basket stat-arb.
 
 Stage 0 (this package): the reusable spread/cointegration primitives plus a
 research-tier daily spread simulation, proven on a known-good basket
-(GOOG/GOOGL). See research/research_notes/RESEARCH_WORKFLOW_basket_statarb.md
+(GOOG/GOOGL). See research/killed/research_notes/RESEARCH_WORKFLOW_basket_statarb.md
 for the staged plan and design decisions, and
-research/research_notes/basket_statarb_proposal.md for full context.
+research/killed/research_notes/basket_statarb_proposal.md for full context.
 
 Research-tier means: pandas/numpy/statsmodels only. No NES, no numba, no
 Databento, no optimizer. The daily sim here is research tooling for inspecting
